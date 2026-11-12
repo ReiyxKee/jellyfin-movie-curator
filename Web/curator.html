@@ -49,6 +49,10 @@
   #MovieCuratorPage .mc-dock .mc-progress { flex: 1; min-width: 0; margin: 0; }
   #MovieCuratorPage .mc-dock .mc-progress-track { flex: 0 0 9em; }
   #MovieCuratorPage .mc-dock-title { font-size: .82em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
+  #MovieCuratorPage .mc-filters > summary.mc-active { border-color: #00a4dc; }
+  #MovieCuratorPage .mc-filters .mc-sources-list h4 { margin: .4em 0 .15em; font-size: .75em; text-transform: uppercase; opacity: .6; letter-spacing: .04em; }
+  #MovieCuratorPage .mc-icon { font-size: 1.1em; line-height: 1; padding: .3em .55em; }
+  #MovieCuratorPage .mc-push { margin-left: auto; }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
   #MovieCuratorPage .mc-member { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
@@ -110,9 +114,7 @@
       <button is="emby-button" type="button" class="raised mc-btn" id="mcTabSeries"><span>Series</span></button>
       <span class="mc-sep"></span>
       <input type="search" class="mc-text" id="mcFilter" placeholder="Filter by name or path" style="min-width:min(14em, 100%)">
-      <label><input type="checkbox" id="mcOnlySus"> Suspicious</label>
-      <label><input type="checkbox" id="mcOnlyChanges"> With folder changes</label>
-      <label><input type="checkbox" id="mcOnlyUnlocked"> Unlocked</label>
+      <span id="mcFilterMenu"></span>
       <span class="mc-summary" id="mcSummary">Loading…</span>
     </div>
     <div class="mc-progress" id="mcProgress" hidden><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div>
@@ -128,8 +130,9 @@
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnlockSel"><span>Unlock</span></button>
       <span class="mc-sep"></span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo"><span>Undo last folder change</span></button>
-      <button is="emby-button" type="button" class="raised mc-btn" id="mcRefresh"><span>Refresh</span></button>
-      <button is="emby-button" type="button" class="raised mc-btn" id="mcOpenNaming"><span>Naming &amp; options…</span></button>
+
+      <button is="emby-button" type="button" class="raised mc-btn mc-icon mc-push" id="mcRefresh" title="Refresh" aria-label="Refresh"><span aria-hidden="true">↻</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn mc-icon" id="mcOpenNaming" title="Naming &amp; options" aria-label="Naming &amp; options"><span aria-hidden="true">⚙</span></button>
     </div>
   </div>
 
@@ -200,12 +203,15 @@
 
   <!-- ============================================================ naming & options modal -->
   <div class="mc-modal" id="mcNaming" hidden>
-    <div class="mc-dialog">
-      <h3><span>Naming &amp; options</span>
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
+      <h3 style="margin:0"><span>⚙ Naming &amp; options</span>
         <span class="mc-bar" style="margin:0">
           <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcSaveNaming"><span>Save</span></button>
           <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
         </span></h3>
+      </div>
+      <div class="mc-dialog-body">
 
       <div class="mc-bar">
         <label><input type="checkbox" id="mcRename" checked> Rename folders &amp; files</label>
@@ -236,6 +242,7 @@
       <textarea class="mc-text" id="mcRules" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace" placeholder="^劇場版\s* =>"></textarea>
       <div class="mc-warn" id="mcRulesErr"></div>
       <div class="mc-meta" id="mcExample" style="margin-top:.4em"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -323,10 +330,27 @@
     if (opaque(bodyBg)) page.style.setProperty('--mc-bg', bodyBg);
   }
   // keep the sticky panel below Jellyfin's own fixed header
-  function stickyOffset() {
+  function headerHeight() {
     var header = document.querySelector('.skinHeader, .MuiAppBar-root');
     var fixed = header && /fixed|sticky/.test(getComputedStyle(header).position);
-    $('#mcPanel').style.top = (fixed ? header.getBoundingClientRect().height : 0) + 'px';
+    return fixed ? Math.round(header.getBoundingClientRect().height) : 0;
+  }
+  function stickyOffset() {
+    $('#mcPanel').style.top = headerHeight() + 'px';
+  }
+  /**
+   * Pop-up windows and the floating progress bar belong to the content area (right of Jellyfin's sidebar, below
+   * its header), not the whole screen; otherwise a docked sidebar overlaps them on wide screens.
+   */
+  function fitToContent() {
+    var r = page.getBoundingClientRect(), vw = window.innerWidth;
+    var left = Math.max(0, Math.round(r.left)), right = Math.max(0, Math.round(vw - r.right));
+    if (r.width >= vw - 4 || r.width < 200) { left = 0; right = 0; } // full-width layout (phones) or not laid out yet
+    var top = headerHeight();
+    $$('.mc-modal').forEach(function (m) { m.style.left = left + 'px'; m.style.right = right + 'px'; m.style.top = top + 'px'; });
+    var cw = vw - left - right, dock = $('#mcDock');
+    dock.style.left = Math.round(left + cw / 2) + 'px';
+    dock.style.width = Math.max(200, Math.min(640, cw - 32)) + 'px';
   }
 
   // ---------------------------------------------------------------- rows
@@ -377,24 +401,59 @@
 
   function groupBlock(p) {
     if (!p.members || p.members.length < 2) return '';
-    var head = '<div class="mc-group-head">🔗 <b>' + p.members.length + ' folders shown as one show</b>' +
+    var parent = (p.finalPath ? short(p.finalPath, p.root) : p.title) + '/';
+    var head = '<div class="mc-group-head">🔗 <b>' + p.members.length + ' folders → one show: 📁 ' + esc(parent) + '</b>' +
       '<span class="mc-meta">' + (p.groupKind === 'manual' ? 'combined by you' : 'Jellyfin gave them the same IDs') +
-      ' · merged as seasons when you adjust folders with "Rename episodes" on</span>' +
+      ' · each folder below becomes its own season folder inside it when you Adjust folders</span>' +
       (p.groupKind === 'manual' ? '<a class="mc-link mc-group-reset">Reset to automatic</a>' : '') + '</div>';
     return '<div class="mc-group">' + head + p.members.map(function (m) {
       return '<div class="mc-member" data-member="' + m.itemId + '">' +
         '<img loading="lazy" alt="" src="' + esc(poster(m.itemId, 120)) + '" onerror="this.style.visibility=\'hidden\'">' +
         '<div class="mc-member-body"><b>' + esc(short(m.path, p.root)) + '/</b>' +
-          (m.isMain ? ' <span class="mc-tag ok">main folder</span>' : '') +
-          (m.season != null ? ' <span class="mc-tag">→ season ' + m.season + '</span>' : '') +
+          (m.season != null ? ' <span class="mc-tag">→ Season ' + m.season + ' folder</span>' : ' <span class="mc-tag warn">season unknown</span>') +
           '<div class="mc-meta">' + esc(m.jellyfinName) + ' (' + (m.year || '?') + ') · ' + esc(idText(m.providerIds)) + ' · ' +
             m.episodeCount + ' episode file(s)</div></div>' +
         '<div class="mc-actions">' +
-          (m.isMain ? '' : '<button is="emby-button" type="button" class="raised mc-btn mc-member-main" title="Keep this folder; the others merge into it"><span>Make main</span></button>') +
+
           '<button is="emby-button" type="button" class="raised mc-btn mc-member-identify"><span>Re-identify</span></button>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-member-detach" title="Not the same show: make it a separate series"><span>Detach</span></button>' +
         '</div></div>';
     }).join('') + '</div>';
+  }
+
+  var SOURCE_TEXT = { custom: 'set by you', name: 'from folder name', jellyfin: 'from Jellyfin', unset: 'unknown' };
+  function seasonFoldersBlock(p) {
+    if (p.kind !== 'series') return '';
+    var folders = p.seasonFolders || [], loose = p.looseVideos || [];
+    if (!folders.length && !loose.length) return '';
+    var counts = {};
+    folders.forEach(function (f) { if (f.action === 'season' && f.season != null) counts[f.season] = (counts[f.season] || 0) + 1; });
+    return '<div class="mc-group"><div class="mc-group-head">📂 <b>Season folders</b>' +
+      '<span class="mc-meta">give each subfolder its season number, or move it out; Adjust folders lays them out as season folders</span></div>' +
+      folders.map(function (f) {
+        var dup = f.action === 'season' && f.season != null && counts[f.season] > 1;
+        return '<div class="mc-member" data-path="' + esc(f.path) + '">' +
+          '<div class="mc-member-body"><b>📁 ' + esc(short(f.path, p.root)) + '/</b> <span class="mc-meta">' + f.videoCount + ' video(s)</span></div>' +
+          '<div class="mc-actions">' +
+            '<select class="mc-text mc-folder-action">' +
+              '<option value="season"' + (f.action === 'season' ? ' selected' : '') + '>Season of this show</option>' +
+              '<option value="show"' + (f.action === 'show' ? ' selected' : '') + '>Separate show (move out)</option>' +
+            '</select>' +
+            (f.action === 'season'
+              ? ' <input class="mc-text mc-folder-season" type="number" min="0" max="99" style="width:4.5em" value="' + (f.season != null ? f.season : '') + '" placeholder="?">' +
+                ' <span class="mc-tag' + (dup ? ' warn' : f.seasonSource === 'custom' ? ' info' : '') + '">' +
+                (dup ? 'same number as another folder' : esc(SOURCE_TEXT[f.seasonSource] || f.seasonSource)) + '</span>'
+              : ' <span class="mc-tag info">moves to the library root</span>') +
+          '</div></div>';
+      }).join('') +
+      loose.map(function (v) {
+        return '<div class="mc-member" data-path="' + esc(v.path) + '">' +
+          '<div class="mc-member-body"><b>🎬 ' + esc(v.path.split('/').pop()) + '</b> <span class="mc-meta">no episode number (movie / special?)</span></div>' +
+          '<div class="mc-actions"><select class="mc-text mc-loose-action">' +
+            '<option value="leave"' + (v.action !== 'movies' ? ' selected' : '') + '>Leave here</option>' +
+            '<option value="movies"' + (v.action === 'movies' ? ' selected' : '') + '>Move to Movies library</option>' +
+          '</select></div></div>';
+      }).join('') + '</div>';
   }
 
   function row(p) {
@@ -429,16 +488,92 @@
             (nWarn ? ' · <span class="mc-warn">' + nWarn + ' note' + (nWarn > 1 ? 's' : '') + '</span>' : '') + (open[p.itemId] ? ' ▾' : ' ▸') + '</span>' +
         '</div>' +
         groupBlock(p) +
+        seasonFoldersBlock(p) +
         (open[p.itemId] ? folderPanel(p) : '') +
       '</div></div>';
   }
 
+  // ---------------------------------------------------------------- filters (different per tab, combined with AND)
+  function ids(p) { return p.providerIds || {}; }
+  function depth(p) { return short(p.path, p.root).split('/').length; }
+  var COMMON_STATE = [
+    { group: 'State', key: 'changes', label: 'With folder changes', test: function (p) { return p.ops.length > 0; } },
+    { group: 'State', key: 'locked', label: 'Locked', not: 'unlocked', test: function (p) { return p.locked; } },
+    { group: 'State', key: 'unlocked', label: 'Unlocked', not: 'locked', test: function (p) { return !p.locked; } },
+    { group: 'State', key: 'verified', label: '✓ Verified', not: 'unverified', test: function (p) { return p.verified; } },
+    { group: 'State', key: 'unverified', label: 'Not verified', not: 'verified', test: function (p) { return !p.verified; } },
+    { group: 'State', key: 'custom', label: 'Custom folder name', test: function (p) { return p.titleSource === 'custom'; } }
+  ];
+  var FILTERS = {
+    movies: [
+      { group: 'Match', key: 'check', label: 'Needs checking', test: function (p) { return p.suspicious; } },
+      { group: 'Match', key: 'noids', label: 'No TMDB / IMDb ID', test: function (p) { return !ids(p).Tmdb && !ids(p).Imdb; } },
+      { group: 'Match', key: 'anime', label: 'Matched by an anime source', test: function (p) { return !!(ids(p).AniList || ids(p).AniDB || ids(p).AniSearch); } },
+      { group: 'Match', key: 'noyear', label: 'Missing year', test: function (p) { return !p.year; } },
+      { group: 'Location', key: 'loose', label: 'Loose file in the library root', test: function (p) { return p.layout === 'loose'; } },
+      { group: 'Location', key: 'collection', label: 'Inside a collection folder', test: function (p) { return p.layout === 'shared' || depth(p) > 2; } }
+    ].concat(COMMON_STATE),
+    series: [
+      { group: 'Match', key: 'check', label: 'Needs checking', test: function (p) { return p.suspicious || p.seasonConflict; } },
+      { group: 'Match', key: 'noids', label: 'No IDs at all', test: function (p) { return !Object.keys(ids(p)).length; } },
+      { group: 'Match', key: 'conflict', label: 'Season numbering conflict', test: function (p) { return p.seasonConflict; } },
+      { group: 'Folders', key: 'container', label: '📦 Shows inside (container)', test: function (p) { return (p.containerShows || []).length > 0; } },
+      { group: 'Folders', key: 'grouped', label: '🔗 Several folders (grouped)', test: function (p) { return (p.members || []).length > 1; } },
+      { group: 'Folders', key: 'detached', label: 'Detached', test: function (p) { return p.detached; } },
+      { group: 'Folders', key: 'unnumbered', label: 'Episodes without numbers', test: function (p) { return p.episodesSkipped > 0; } },
+      { group: 'Folders', key: 'seasonfolders', label: '📂 Has season subfolders', test: function (p) { return (p.seasonFolders || []).length > 1; } },
+      { group: 'Folders', key: 'loose', label: '🎬 Loose movies / specials', test: function (p) { return (p.looseVideos || []).length > 0; } }
+    ].concat(COMMON_STATE)
+  };
+  var activeFilters = { movies: [], series: [] };
+  function loadFilters(t2) {
+    try { activeFilters[t2] = JSON.parse(localStorage.getItem('movieCurator.filters.' + t2) || '[]'); } catch (e) { activeFilters[t2] = []; }
+  }
+  function saveFilters() {
+    try { localStorage.setItem('movieCurator.filters.' + type, JSON.stringify(activeFilters[type])); } catch (e) { /* unavailable */ }
+  }
+  loadFilters('movies'); loadFilters('series');
+
+  function renderFilterMenu() {
+    var defs = FILTERS[type], on = activeFilters[type], lastGroup = null;
+    var details = $('#mcFilterMenu details'), wasOpen = details && details.open;
+    $('#mcFilterMenu').innerHTML = '<details class="mc-sources mc-filters"><summary class="' + (on.length ? 'mc-active' : '') + '">Filters' +
+      (on.length ? ' (' + on.length + ')' : '') + ' ▾</summary><div class="mc-sources-list">' +
+      defs.map(function (d) {
+        var head = d.group !== lastGroup ? '<h4>' + esc(d.group) + '</h4>' : '';
+        lastGroup = d.group;
+        return head + '<label><input type="checkbox" class="mc-filter" value="' + d.key + '"' + (on.indexOf(d.key) >= 0 ? ' checked' : '') + '> ' + esc(d.label) + '</label>';
+      }).join('') +
+      (on.length ? '<div style="margin-top:.4em"><a class="mc-link mc-filter-clear">Clear filters</a></div>' : '') + '</div></details>';
+    if (wasOpen) $('#mcFilterMenu details').open = true;
+  }
+  $('#mcFilterMenu').addEventListener('change', function (e) {
+    if (!e.target.classList.contains('mc-filter')) return;
+    var key = e.target.value, on = activeFilters[type];
+    var def = FILTERS[type].filter(function (d) { return d.key === key; })[0];
+    if (e.target.checked) {
+      if (on.indexOf(key) < 0) on.push(key);
+      if (def && def.not) activeFilters[type] = on = on.filter(function (k) { return k !== def.not; }); // opposites exclude each other
+    } else {
+      activeFilters[type] = on.filter(function (k) { return k !== key; });
+    }
+    saveFilters();
+    renderFilterMenu();
+    render();
+  });
+  $('#mcFilterMenu').addEventListener('click', function (e) {
+    if (!e.target.closest('.mc-filter-clear')) return;
+    activeFilters[type] = [];
+    saveFilters();
+    renderFilterMenu();
+    render();
+  });
+
   function visible() {
     var f = $('#mcFilter').value.toLowerCase();
+    var tests = FILTERS[type].filter(function (d) { return activeFilters[type].indexOf(d.key) >= 0; });
     return plans.filter(function (p) {
-      if ($('#mcOnlyChanges').checked && !p.ops.length) return false;
-      if ($('#mcOnlySus').checked && !p.suspicious && !p.seasonConflict) return false;
-      if ($('#mcOnlyUnlocked').checked && p.locked) return false;
+      for (var i = 0; i < tests.length; i++) if (!tests[i].test(p)) return false;
       if (f && (p.jellyfinName + ' ' + (p.originalTitle || '') + ' ' + p.title + ' ' + p.path).toLowerCase().indexOf(f) < 0) return false;
       return true;
     });
@@ -513,6 +648,7 @@
     var show = !!task && $(task.modal).hidden;
     $('#mcDock').hidden = !show;
     if (show) {
+      fitToContent();
       $('#mcDockTitle').textContent = task.title;
       if (task.last) progress('#mcDockProgress', task.last);
     }
@@ -562,7 +698,7 @@
   }
 
   // ---------------------------------------------------------------- modals
-  function showModal(id) { $(id).hidden = false; document.body.style.overflow = 'hidden'; syncDock(); }
+  function showModal(id) { fitToContent(); $(id).hidden = false; document.body.style.overflow = 'hidden'; syncDock(); }
   function hideModal(id) {
     $(id).hidden = true;
     if (!$$('.mc-modal').some(function (m) { return !m.hidden; })) document.body.style.overflow = '';
@@ -1158,11 +1294,11 @@
     $('#mcTabMovies').classList.toggle('button-submit', type === 'movies');
     $('#mcTabSeries').classList.toggle('button-submit', type === 'series');
     syncTypeVisibility();
+    renderFilterMenu();
     load();
   }
   $('#mcTabMovies').addEventListener('click', function () { setType('movies'); });
   $('#mcTabSeries').addEventListener('click', function () { setType('series'); });
-  ['#mcOnlyChanges', '#mcOnlySus', '#mcOnlyUnlocked'].forEach(function (s) { $(s).addEventListener('change', render); });
   $('#mcFilter').addEventListener('input', render);
   $('#mcRefresh').addEventListener('click', load);
   $('#mcSelectAllBox').addEventListener('change', function (e) {
@@ -1244,9 +1380,29 @@
     return api('POST', 'Name', { itemId: id, name: name }).then(load)
       .catch(function (e) { Dashboard.alert('Could not save name: ' + e.message); });
   }
+  function saveFolderRule(path, action, season) {
+    api('POST', 'FolderRule', { path: path, action: action, season: season })
+      .then(load).catch(function (err) { Dashboard.alert('Could not save: ' + err.message); });
+  }
   $('#mcList').addEventListener('change', function (e) {
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;
+    var folderEl = e.target.closest('[data-path]');
+    if (folderEl && e.target.classList.contains('mc-folder-action')) {
+      var seasonInput = folderEl.querySelector('.mc-folder-season');
+      var v0 = seasonInput ? seasonInput.value.trim() : '';
+      saveFolderRule(folderEl.getAttribute('data-path'), e.target.value, e.target.value === 'season' && v0 !== '' ? parseInt(v0, 10) : null);
+      return;
+    }
+    if (folderEl && e.target.classList.contains('mc-folder-season')) {
+      var v = e.target.value.trim();
+      saveFolderRule(folderEl.getAttribute('data-path'), 'season', v === '' ? null : parseInt(v, 10));
+      return;
+    }
+    if (folderEl && e.target.classList.contains('mc-loose-action')) {
+      saveFolderRule(folderEl.getAttribute('data-path'), e.target.value, null);
+      return;
+    }
     var id = rowEl.getAttribute('data-id');
     if (e.target.classList.contains('mc-sel')) {
       if (e.target.checked) selected[id] = true; else delete selected[id];
@@ -1276,7 +1432,6 @@
     function regroup(path, body) { api('POST', path, body).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); }); }
     if (memberId && e.target.closest('.mc-member-identify')) { openIdentify(memberId); return; }
     if (memberId && e.target.closest('.mc-member-detach')) { regroup('Group/Detach', { itemIds: [memberId] }); return; }
-    if (memberId && e.target.closest('.mc-member-main')) { regroup('Group/Combine', { itemIds: groupIds, mainItemId: memberId }); return; }
     if (e.target.closest('.mc-group-reset')) { regroup('Group/Reset', { itemIds: groupIds }); return; }
     if (e.target.closest('.mc-undo-detach')) { regroup('Group/Reset', { itemIds: [id] }); return; }
     if (e.target.closest('.mc-identify')) openIdentify(id);
@@ -1307,11 +1462,15 @@
   page.addEventListener('pageshow', function () {
     themeBackground();
     stickyOffset();
+    fitToContent();
     syncDock();
     syncTypeVisibility();
+    renderFilterMenu();
     load();
   });
-  window.addEventListener('resize', stickyOffset);
+  window.addEventListener('resize', function () { stickyOffset(); fitToContent(); });
+  // opening / closing Jellyfin's sidebar changes the content width without a window resize
+  if (window.ResizeObserver) new ResizeObserver(function () { fitToContent(); }).observe(page);
 })();
 </script>
 </div>

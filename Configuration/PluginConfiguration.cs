@@ -55,11 +55,27 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Series folders combined by hand into one show (any IDs). Paths as Jellyfin sees them.</summary>
     public List<SeriesGroup> SeriesGroups { get; set; } = new();
 
+    /// <summary>
+    /// Per-folder choices inside a series: a subfolder's season number, "show" (move it out as its own series), or for a
+    /// loose video "movies" (move it to the Movies library). Paths as Jellyfin sees them.
+    /// </summary>
+    public List<FolderRule> FolderRules { get; set; } = new();
+
     /// <summary>Series folders detached by hand: never grouped automatically with same-ID folders.</summary>
     public List<string> DetachedSeries { get; set; } = new();
 
     /// <summary>Names typed by hand in the UI. Key is "tmdb:22", "tv-tvdb:81189", "imdb:tt..." or "path:/media/...".</summary>
     public List<NameOverride> Overrides { get; set; } = new();
+}
+
+public class FolderRule
+{
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>"season" (default) | "show" | "movies" | "leave"</summary>
+    public string Action { get; set; } = "season";
+
+    public int? Season { get; set; }
 }
 
 public class SeriesGroup

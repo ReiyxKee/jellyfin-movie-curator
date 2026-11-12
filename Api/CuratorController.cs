@@ -44,6 +44,16 @@ public class GroupRequest
     [JsonPropertyName("mainItemId")] public string? MainItemId { get; set; }
 }
 
+public class FolderRuleRequest
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    /// <summary>season | show | movies | leave</summary>
+    [JsonPropertyName("action")] public string Action { get; set; } = "season";
+
+    [JsonPropertyName("season")] public int? Season { get; set; }
+}
+
 public class NameRequest
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
@@ -142,6 +152,12 @@ public class CuratorController : ControllerBase
     [HttpPost("WriteNfo")]
     public ActionResult<string> WriteNfo([FromBody] NfoRequest request)
         => Guid.TryParse(request.ItemId, out var id) && _library.GetItemById(id) is { } item ? _service.WriteNfo(item, request.LockNfo) : NotFound();
+
+    /// <summary>Set what happens to a subfolder (season number / separate show) or a loose video (Movies library).</summary>
+    [HttpPost("FolderRule")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult SetFolderRule([FromBody] FolderRuleRequest request)
+        => _service.SetFolderRule(request.Path, request.Action, request.Season) ? NoContent() : BadRequest("Path is not inside a library.");
 
     /// <summary>Combine series folders into one show (as seasons), whatever their IDs.</summary>
     [HttpPost("Group/Combine")]

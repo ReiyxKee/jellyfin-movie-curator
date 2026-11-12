@@ -118,6 +118,12 @@ public class ItemPlan
 
     [JsonPropertyName("seasonSource")] public string? SeasonSource { get; set; }
 
+    /// <summary>Series: its season subfolders, with the season number each one becomes.</summary>
+    [JsonPropertyName("seasonFolders")] public List<SeasonFolderInfo> SeasonFolders { get; set; } = new();
+
+    /// <summary>Series: unnumbered videos directly in the series folder (movies / specials).</summary>
+    [JsonPropertyName("looseVideos")] public List<LooseVideoInfo> LooseVideos { get; set; } = new();
+
     /// <summary>Series: every folder in this group ("auto" = same IDs, "manual" = combined by you); empty when alone.</summary>
     [JsonPropertyName("members")] public List<GroupMember> Members { get; set; } = new();
 
@@ -169,6 +175,32 @@ public class GroupMember
     [JsonPropertyName("guessYear")] public int? GuessYear { get; set; }
 
     [JsonPropertyName("kind")] public string Kind { get; set; } = "series";
+}
+
+/// <summary>A subfolder of a series folder (usually one season).</summary>
+public class SeasonFolderInfo
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("videoCount")] public int VideoCount { get; set; }
+
+    /// <summary>Season it becomes (null = unknown, please set one).</summary>
+    [JsonPropertyName("season")] public int? Season { get; set; }
+
+    /// <summary>custom | jellyfin | name | unset</summary>
+    [JsonPropertyName("seasonSource")] public string SeasonSource { get; set; } = "unset";
+
+    /// <summary>season | show</summary>
+    [JsonPropertyName("action")] public string Action { get; set; } = "season";
+}
+
+/// <summary>A video directly in a series folder that Jellyfin couldn't number (often a movie or special).</summary>
+public class LooseVideoInfo
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    /// <summary>leave | movies</summary>
+    [JsonPropertyName("action")] public string Action { get; set; } = "leave";
 }
 
 public class ApplyResult
@@ -1019,12 +1051,18 @@ public class CuratorService
             .GroupBy(e => e.SeriesId)
             .ToDictionary(g => g.Key, g => g.OrderBy(e => e.Path, StringComparer.Ordinal).ToList());
 
+        var moviesRoot = _library.GetVirtualFolders()
+            .Where(f => string.Equals(f.CollectionType?.ToString(), "movies", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(f => f.Locations)
+            .Select(l => l.TrimEnd('/'))
+            .FirstOrDefault();
+
         foreach (var group in series.GroupBy(IdentityKey))
         {
             var members = group.ToList();
             try
             {
-                var plan = PlanSeries(members, episodesBySeries, opt, ctx);
+                var plan = PlanSeries(members, episodesBySeries, opt, ctx, moviesRoot);
                 plan.Root = RootOf(plan.Path, roots);
                 plans.Add(plan);
             }
@@ -1037,7 +1075,7 @@ public class CuratorService
         return plans;
     }
 
-    private static ItemPlan PlanSeries(List<Series> members, Dictionary<Guid, List<Episode>> episodesBySeries, PlanOptions opt, Ctx ctx)
+    private static ItemPlan PlanSeries(List<Series> members, Dictionary<Guid, List<Episode>> episodesBySeries, PlanOptions opt, Ctx ctx, string? moviesRoot)
     {
         // The folder that stays: one already named as the template wants, else the one without a season in its name,
         // else the lowest season / shortest name. Other folders of the same show are merged into it.
@@ -1153,8 +1191,76 @@ public class CuratorService
             var hint = members.Count > 1
                 ? SeasonFromName(System.IO.Path.GetFileName(mDir))
                 : SeasonFromName(m.Name, System.IO.Path.GetFileName(mDir), m.OriginalTitle);
-            var eps = (episodesBySeries.GetValueOrDefault(m.Id) ?? new List<Episode>())
-                .Select(e => (e, SeasonFor(e, custom, hint).Season)).ToList();
+            var rawEps = episodesBySeries.GetValueOrDefault(m.Id) ?? new List<Episode>();
+
+            // subfolders of this series folder: their season numbers, or "separate show" (moved out)
+            var subSeasons = new Dictionary<string, (int? Season, string Source)>(StringComparer.Ordinal);
+            var excludedDirs = new List<string>();
+            var subs = Directory.GetDirectories(mDir).Where(d => !IsJunk(d) && HasVideosBelow(d)).OrderBy(d => d, StringComparer.Ordinal).ToList();
+            foreach (var sub in subs)
+            {
+                var inSub = rawEps.Where(e => IsUnder(e.Path, sub)).ToList();
+                var fs = FolderSeason(sub, inSub);
+                var action = FolderRuleFor(sub)?.Action == "show" ? "show" : "season";
+                subSeasons[sub] = fs;
+                p.SeasonFolders.Add(new SeasonFolderInfo
+                {
+                    Path = sub,
+                    VideoCount = Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories).Count(IsVideo),
+                    Season = fs.Season,
+                    SeasonSource = fs.Source,
+                    Action = action,
+                });
+                if (action == "show")
+                {
+                    excludedDirs.Add(sub);
+                    var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mDir)!, FlattenName(System.IO.Path.GetFileName(mDir), System.IO.Path.GetFileName(sub)));
+                    Move(p, ctx, sub, target, "dirmove", "flatten");
+                }
+            }
+
+            if (p.SeasonFolders.Count < 2 && members.Count == 1)
+            {
+                p.SeasonFolders.Clear(); // a single subfolder isn't worth a panel
+            }
+
+            // unnumbered videos directly in the series folder (movies / specials): leave, or move to the Movies library
+            var excludedFiles = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && e.IndexNumber == null))
+            {
+                var action = FolderRuleFor(e.Path)?.Action == "movies" ? "movies" : "leave";
+                p.LooseVideos.Add(new LooseVideoInfo { Path = e.Path, Action = action });
+                if (action == "movies" && moviesRoot != null)
+                {
+                    excludedFiles.Add(e.Path);
+                    var stem = System.IO.Path.GetFileNameWithoutExtension(e.Path);
+                    var movieDir = System.IO.Path.Combine(moviesRoot, Safe(CleanName(stem)));
+                    MkDir(p, ctx, movieDir);
+                    foreach (var f in new[] { e.Path }.Concat(Sidecars(e.Path, Directory.GetFiles(mDir))))
+                    {
+                        Move(p, ctx, f, System.IO.Path.Combine(movieDir, System.IO.Path.GetFileName(f)), "move", "to Movies library");
+                    }
+                }
+                else if (action == "movies")
+                {
+                    p.Warnings.Add("No Movies library found to move videos into.");
+                }
+            }
+
+            var eps = rawEps
+                .Where(e => !excludedFiles.Contains(e.Path) && !excludedDirs.Any(d => IsUnder(e.Path, d)))
+                .Select(e =>
+                {
+                    var sub = subSeasons.Keys.FirstOrDefault(d => IsUnder(e.Path, d));
+                    if (sub != null && subSeasons[sub].Season is int fs && subSeasons[sub].Source is "custom" or "name" or "jellyfin")
+                    {
+                        // a subfolder decides its episodes' season, unless Jellyfin says 2+ for the episode itself
+                        return (e, e.ParentIndexNumber is int pn && pn != 1 && subSeasons[sub].Source != "custom" ? pn : fs);
+                    }
+
+                    return (e, SeasonFor(e, custom, hint).Season);
+                })
+                .ToList();
             sources.Add(new SeasonSource(m, mDir, eps));
 
             var unplaced = eps.Select(x => x.e).Where(e => e.ParentIndexNumber is null).ToList();
@@ -1168,15 +1274,12 @@ public class CuratorService
         }
 
         // 2. episodes -> "<series>/<season folder>/<episode name>", merging the other folders of the same show
-        if (opt.Episodes)
+        // Grouped folders, or a series whose subfolders you numbered, are laid out as "<series>/<season folder>/".
+        // File names only change when "Rename episodes" is on.
+        var hasFolderRules = sources.Any(src => Config.FolderRules.Any(r => IsUnder(r.Path, src.Dir)));
+        if (opt.Episodes || others.Count > 0 || hasFolderRules)
         {
-            PlanEpisodes(p, ctx, s, dir, sources, names.Folder);
-        }
-        else if (others.Count > 0)
-        {
-            p.Warnings.Add($"{others.Count} other folder(s) are the same show in Jellyfin: "
-                + string.Join(", ", others.Select(o => System.IO.Path.GetFileName(o.Path.TrimEnd('/'))))
-                + ". Turn on 'Rename episodes into season folders' to merge them here as separate seasons.");
+            PlanEpisodes(p, ctx, s, dir, sources, names.Folder, opt.Episodes);
         }
 
         // 3. series folder rename (after episode moves, which use the old path)
@@ -1208,9 +1311,13 @@ public class CuratorService
         return p;
     }
 
-    private static void PlanEpisodes(ItemPlan p, Ctx ctx, Series s, string dir, List<SeasonSource> sources, string seriesFolder)
+    private static void PlanEpisodes(ItemPlan p, Ctx ctx, Series s, string dir, List<SeasonSource> sources, string seriesFolder, bool renameFiles)
     {
         var seasonTpl = Config.SeasonFolderTemplate ?? DefaultSeasonFolder; // set to empty = episodes directly in the series folder
+        if (string.IsNullOrWhiteSpace(seasonTpl) && sources.Count > 1)
+        {
+            seasonTpl = "Season {season}"; // merged folders always need a season folder each
+        }
         var episodeTpl = Or(Config.EpisodeTemplate, DefaultEpisodeFile);
         var all = sources.SelectMany(x => x.Episodes.Select(e => (x.Dir, e.Episode, e.Season))).ToList();
         var numbered = all.Where(x => x.Episode.IndexNumber.HasValue && IsUnder(x.Episode.Path, x.Dir)).ToList();
@@ -1253,20 +1360,20 @@ public class CuratorService
             tokens["episodes"] = "E" + number.ToString(pad, CultureInfo.InvariantCulture)
                 + (end is int en ? "-E" + en.ToString(pad, CultureInfo.InvariantCulture) : string.Empty);
             tokens["episodeTitle"] = e.Name ?? string.Empty;
-            // a merged folder's Jellyfin season title is just its folder name, so only use it for the main folder
+            // a merged folder's Jellyfin season title is just its folder name, so only use it inside the main folder
             tokens["seasonTitle"] = srcDir == dir ? SeasonTitle(e) : string.Empty;
+            var stem = System.IO.Path.GetFileNameWithoutExtension(e.Path);
 
             var seasonName = string.IsNullOrWhiteSpace(seasonTpl) ? string.Empty : Safe(Render(seasonTpl, tokens));
             var seasonDir = seasonName.Length == 0 ? dir : System.IO.Path.Combine(dir, seasonName);
             destDirs.Add(seasonDir);
-            var newStem = Safe(Render(episodeTpl, tokens));
+            var newStem = renameFiles ? Safe(Render(episodeTpl, tokens)) : stem;
             if (newStem.Length == 0)
             {
                 continue;
             }
 
             var oldDir = System.IO.Path.GetDirectoryName(e.Path)!;
-            var stem = System.IO.Path.GetFileNameWithoutExtension(e.Path);
             if (oldDir == seasonDir && stem == newStem)
             {
                 continue; // already tidy
@@ -1365,6 +1472,51 @@ public class CuratorService
         }
 
         return new XDocument(new XDeclaration("1.0", "utf-8", "yes"), x).Declaration + "\n" + x + "\n";
+    }
+
+    // ------------------------------------------------------------------ per-folder rules inside a series
+    private static FolderRule? FolderRuleFor(string path) => Config.FolderRules.FirstOrDefault(r => r.Path == path);
+
+    /// <summary>Save what to do with a subfolder (season number / separate show) or a loose video (Movies library).</summary>
+    public bool SetFolderRule(string path, string action, int? season)
+    {
+        path = path.TrimEnd('/');
+        if (!LibraryRoots().Any(r => IsUnder(path, r)) || !(Directory.Exists(path) || File.Exists(path)))
+        {
+            return false;
+        }
+
+        Config.FolderRules.RemoveAll(r => r.Path == path);
+        var automatic = (action == "season" && season == null) || action == "leave";
+        if (!automatic)
+        {
+            Config.FolderRules.Add(new FolderRule { Path = path, Action = action, Season = season });
+        }
+
+        Plugin.Instance!.SaveConfiguration();
+        return true;
+    }
+
+    /// <summary>Season of a subfolder: your number, else Jellyfin's when it isn't 1, else a number in its name, else Jellyfin's 1.</summary>
+    private static (int? Season, string Source) FolderSeason(string sub, IEnumerable<Episode> inSub)
+    {
+        if (FolderRuleFor(sub)?.Season is int custom)
+        {
+            return (custom, "custom");
+        }
+
+        var jf = inSub.Select(e => e.Season?.IndexNumber ?? e.ParentIndexNumber).FirstOrDefault(x => x != null);
+        if (jf is int j && j != 1)
+        {
+            return (j, "jellyfin");
+        }
+
+        if (SeasonFromName(System.IO.Path.GetFileName(sub)) is int hint)
+        {
+            return (hint, "name");
+        }
+
+        return jf is int one ? (one, "jellyfin") : (null, "unset");
     }
 
     // ------------------------------------------------------------------ manual series grouping
