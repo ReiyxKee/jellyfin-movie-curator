@@ -6,7 +6,9 @@
   #MovieCuratorPage .mc-bar label { display: inline-flex; gap: .3em; align-items: center; cursor: pointer; font-size: .9em; }
   #MovieCuratorPage .mc-sep { width: 1px; align-self: stretch; background: var(--mc-line); }
   #MovieCuratorPage .mc-btn { font-size: .85em; padding: .3em .8em; min-width: 0; margin: 0; }
-  #MovieCuratorPage .mc-text { padding: .4em .6em; background: var(--mc-soft); color: inherit; border: 1px solid var(--mc-line); border-radius: 4px; font: inherit; }
+  #MovieCuratorPage { max-width: 100%; }
+  #MovieCuratorPage .content-primary { min-width: 0; }
+  #MovieCuratorPage .mc-text { box-sizing: border-box; max-width: 100%; padding: .4em .6em; background: var(--mc-soft); color: inherit; border: 1px solid var(--mc-line); border-radius: 4px; font: inherit; }
   #MovieCuratorPage .mc-summary { font-size: .85em; opacity: .8; }
   #MovieCuratorPage .mc-tag { display: inline-block; font-size: .72em; font-weight: normal; padding: .1em .55em; border-radius: 999px; background: var(--mc-soft); vertical-align: middle; margin-left: .3em; }
   #MovieCuratorPage .mc-tag.warn { background: rgba(224,160,48,.3); }
@@ -23,14 +25,15 @@
   #MovieCuratorPage .mc-poster { width: 74px; height: 111px; object-fit: cover; border-radius: 4px; background: var(--mc-soft); flex: none; }
   #MovieCuratorPage .mc-poster.mc-noimg { visibility: hidden; }
   #MovieCuratorPage .mc-body { flex: 1; min-width: 0; }
-  #MovieCuratorPage .mc-title { font-size: 1.05em; font-weight: 600; }
+  #MovieCuratorPage .mc-title { font-size: 1.05em; font-weight: 600; overflow-wrap: anywhere; }
   #MovieCuratorPage .mc-year { opacity: .7; font-weight: normal; }
+  #MovieCuratorPage .mc-where { font-family: monospace; font-size: .78em; opacity: .75; overflow-wrap: anywhere; margin: .1em 0; }
   #MovieCuratorPage .mc-desc { font-size: .85em; opacity: .85; margin: .3em 0 .45em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
   #MovieCuratorPage .mc-actions { display: flex; flex-wrap: wrap; gap: .4em; align-items: center; }
   #MovieCuratorPage .mc-folder-toggle { cursor: pointer; font-size: .85em; opacity: .85; margin-left: .3em; user-select: none; }
   #MovieCuratorPage .mc-folder { margin-top: .5em; padding: .6em .7em; border-radius: 6px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-folder .mc-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; margin-bottom: .4em; }
-  #MovieCuratorPage .mc-folder .mc-name input { flex: 1; min-width: 12em; }
+  #MovieCuratorPage .mc-folder .mc-name input { flex: 1; min-width: min(12em, 100%); }
   #MovieCuratorPage .mc-progress { display: flex; align-items: center; gap: .6em; margin: .35em 0 .1em; font-size: .82em; }
   #MovieCuratorPage .mc-progress[hidden] { display: none; }
   #MovieCuratorPage .mc-progress-track { flex: 0 1 26em; height: 6px; border-radius: 3px; background: var(--mc-soft); overflow: hidden; position: relative; }
@@ -45,13 +48,13 @@
   #MovieCuratorPage .mc-dock[hidden] { display: none; }
   #MovieCuratorPage .mc-dock .mc-progress { flex: 1; min-width: 0; margin: 0; }
   #MovieCuratorPage .mc-dock .mc-progress-track { flex: 0 0 9em; }
-  #MovieCuratorPage .mc-dock-title { font-size: .82em; font-weight: 600; white-space: nowrap; }
+  #MovieCuratorPage .mc-dock-title { font-size: .82em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
-  #MovieCuratorPage .mc-member { display: flex; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
+  #MovieCuratorPage .mc-member { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
   #MovieCuratorPage .mc-member img { width: 34px; height: 51px; object-fit: cover; border-radius: 3px; background: var(--mc-soft); flex: none; }
   #MovieCuratorPage .mc-member .mc-member-body { flex: 1; min-width: 0; font-size: .85em; }
-  #MovieCuratorPage .mc-member .mc-actions { flex: none; }
+  #MovieCuratorPage .mc-member .mc-actions { flex: 0 1 auto; }
   #MovieCuratorPage .mc-link { cursor: pointer; text-decoration: underline; font-size: .82em; opacity: .85; }
   #MovieCuratorPage .mc-ops { font-family: monospace; font-size: .78em; white-space: pre-wrap; word-break: break-all; margin-top: .4em; max-height: 22em; overflow: auto; }
 
@@ -59,32 +62,40 @@
   #MovieCuratorPage .mc-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 1em; overflow: auto; }
   #MovieCuratorPage .mc-modal[hidden] { display: none; }
   #MovieCuratorPage .mc-dialog { background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 8px; width: min(900px, 100%); padding: 1em 1.2em; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-  #MovieCuratorPage .mc-dialog h3 { margin: 0 0 .6em; display: flex; justify-content: space-between; align-items: center; gap: 1em; }
+  #MovieCuratorPage .mc-dialog h3 { margin: 0 0 .6em; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5em 1em; }
+  #MovieCuratorPage .mc-dialog h3 > span:first-child { min-width: 0; overflow-wrap: anywhere; }
   /* dialogs with a fixed header: only the body scrolls */
   #MovieCuratorPage .mc-dialog.mc-split { padding: 0; max-height: 92vh; display: flex; flex-direction: column; }
   #MovieCuratorPage .mc-split > .mc-dialog-head { flex: none; padding: 1em 1.2em .6em; border-bottom: 1px solid var(--mc-line); position: relative; z-index: 2; background: var(--mc-bg); border-radius: 8px 8px 0 0; }
   #MovieCuratorPage .mc-split > .mc-dialog-body { flex: 1; min-height: 0; overflow: auto; padding: .4em 1.2em 1em; }
   /* the search window can open on top of the batch window */
   #MovieCuratorPage #mcIdentify { z-index: 1010; }
-  #MovieCuratorPage .mc-form { display: grid; grid-template-columns: 1fr 6em; gap: .5em; }
+  #MovieCuratorPage .mc-form { display: grid; grid-template-columns: minmax(0, 1fr) 6em; gap: .5em; }
   #MovieCuratorPage .mc-form .mc-wide { grid-column: 1 / -1; }
-  #MovieCuratorPage .mc-form .mc-ids { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: .5em; }
-  #MovieCuratorPage .mc-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .8em; margin-top: .9em; }
+  #MovieCuratorPage .mc-form .mc-ids { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9em, 100%), 1fr)); gap: .5em; }
+  #MovieCuratorPage .mc-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: .8em; margin-top: .9em; }
   #MovieCuratorPage .mc-result { border: 1px solid var(--mc-line); border-radius: 6px; padding: .5em; display: flex; flex-direction: column; gap: .3em; font-size: .85em; }
   #MovieCuratorPage .mc-result.mc-best { border-color: rgba(82,181,75,.8); box-shadow: 0 0 0 1px rgba(82,181,75,.6); }
   #MovieCuratorPage .mc-result img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-result .mc-ov { opacity: .7; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-  #MovieCuratorPage .mc-batch-row { display: grid; grid-template-columns: auto 46px 1fr auto 46px 1.4fr; gap: .6em; align-items: center; padding: .5em 0; border-bottom: 1px solid var(--mc-line); font-size: .88em; }
+  #MovieCuratorPage .mc-batch-row { display: grid; grid-template-columns: auto 46px minmax(0, 1fr) auto 46px minmax(0, 1.4fr); gap: .6em; align-items: center; padding: .5em 0; border-bottom: 1px solid var(--mc-line); font-size: .88em; }
   #MovieCuratorPage .mc-batch-row img { width: 46px; height: 69px; object-fit: cover; border-radius: 3px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-batch-row select { width: 100%; }
   #MovieCuratorPage .mc-sources { position: relative; display: inline-block; }
   #MovieCuratorPage .mc-sources > summary { list-style: none; cursor: pointer; font-size: .85em; padding: .35em .7em; border: 1px solid var(--mc-line); border-radius: 4px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-sources > summary::-webkit-details-marker { display: none; }
-  #MovieCuratorPage .mc-sources-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 16em; padding: .5em .7em; background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  #MovieCuratorPage .mc-sources-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: min(16em, calc(100vw - 2em)); max-width: calc(100vw - 2em); padding: .5em .7em; background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
   #MovieCuratorPage .mc-sources-list label { display: flex; gap: .45em; align-items: center; padding: .2em 0; font-size: .9em; cursor: pointer; }
   #MovieCuratorPage .mc-sources-list .mc-note { font-size: .75em; opacity: .65; margin-left: auto; padding-left: 1em; }
   @media (max-width: 700px) {
-    #MovieCuratorPage .mc-batch-row { grid-template-columns: auto 1fr; }
+    #MovieCuratorPage .mc-batch-row { grid-template-columns: auto minmax(0, 1fr); }
+    #MovieCuratorPage .mc-batch-row > div:last-child { grid-column: 1 / -1; }
+    #MovieCuratorPage .mc-poster { width: 52px; height: 78px; }
+    #MovieCuratorPage .mc-row { gap: .6em; }
+    #MovieCuratorPage .mc-row > input[type=checkbox] { margin-top: 1.6em; }
+    #MovieCuratorPage .mc-dialog.mc-split { max-height: 96vh; }
+    #MovieCuratorPage .mc-modal { padding: 2vh .5em; }
+    #MovieCuratorPage .mc-sep { display: none; }
     #MovieCuratorPage .mc-batch-row img, #MovieCuratorPage .mc-batch-row .mc-arrow { display: none; }
   }
 </style>
@@ -98,7 +109,7 @@
       <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcTabMovies"><span>Movies</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcTabSeries"><span>Series</span></button>
       <span class="mc-sep"></span>
-      <input type="search" class="mc-text" id="mcFilter" placeholder="Filter by name or path" style="min-width:14em">
+      <input type="search" class="mc-text" id="mcFilter" placeholder="Filter by name or path" style="min-width:min(14em, 100%)">
       <label><input type="checkbox" id="mcOnlySus"> Suspicious</label>
       <label><input type="checkbox" id="mcOnlyChanges"> With folder changes</label>
       <label><input type="checkbox" id="mcOnlyUnlocked"> Unlocked</label>
@@ -135,7 +146,7 @@
   <div class="mc-modal" id="mcIdentify" hidden>
     <div class="mc-dialog mc-split">
       <div class="mc-dialog-head">
-      <h3><span id="mcIdTitle">Identify</span>
+      <h3><span><span id="mcIdTitle">Identify</span><span class="mc-where" id="mcIdWhere" style="display:block;font-weight:normal"></span></span>
         <span class="mc-bar" style="margin:0"><button is="emby-button" type="button" class="raised mc-btn mc-stop" hidden title="Click: finish the current item, then stop. Click again within 3 s: stop now and roll the current item back"><span>■ Stop</span></button>
         <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button></span></h3>
       <form class="mc-form" id="mcIdForm">
@@ -170,7 +181,7 @@
           <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchApply"><span>Apply checked</span></button>
           <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
         </span></h3>
-      <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match (pre-ticked). Pick another result from a row's list,
+      <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match. Tick the rows to apply (or Select all). Pick another result from a row's list,
         use <b>🔍 Manual search</b> to find it yourself (any source, name or ID), or untick to skip. Nothing changes until <b>Apply checked</b>.</p>
       <div class="mc-bar">
         <label title="Tick / untick every row that has a result"><input type="checkbox" id="mcBatchAll" style="transform:scale(1.2)"> Select all</label>
@@ -283,6 +294,12 @@
     return hit;
   }
   function short(p, root) { return root && p.indexOf(root + '/') === 0 ? p.slice(root.length + 1) : p; }
+  /** Where the item is on disk now: "Folder/file.mkv" for a movie, "Folder/" for a series (relative to the library). */
+  function where(p) {
+    if (!p || !p.path) return '';
+    var root = p.root || (plans[0] && plans[0].root) || '';
+    return short(p.path, root) + (p.kind === 'series' ? '/' : '');
+  }
   function idText(ids) { return Object.keys(ids || {}).sort().map(function (k) { return k + ' ' + ids[k]; }).join(' · ') || 'no IDs'; }
   function poster(id, h) { return ApiClient.getUrl('Items/' + id + '/Images/Primary', { maxHeight: h || 240, quality: 85 }); }
   function opts() {
@@ -398,6 +415,7 @@
       '<img class="mc-poster" loading="lazy" alt="" src="' + esc(poster(p.itemId)) + '" onerror="this.classList.add(\'mc-noimg\')">' +
       '<div class="mc-body">' +
         '<div class="mc-title">' + esc(p.jellyfinName) + ' <span class="mc-year">(' + (p.year || '?') + ')</span>' + tags.join('') + '</div>' +
+        '<div class="mc-where" title="Current folder / file on disk">📁 ' + esc(where(p)) + '</div>' +
         '<div class="mc-meta">' + orig + esc(idText(p.providerIds)) + '</div>' +
         '<div class="mc-desc">' + (p.overview ? esc(p.overview) : '<i>No description.</i>') + '</div>' +
         '<div class="mc-actions">' +
@@ -747,6 +765,9 @@
     pickIndex = b ? index : null;
     identifySources = chosenSources();
     $('#mcIdTitle').textContent = (b ? 'Find a match for: ' : 'Identify: ') + p.jellyfinName;
+    $('#mcIdWhere').textContent = '📁 ' + where(p.root ? p : Object.assign({ root: (plans.filter(function (x) {
+      return (x.members || []).some(function (m) { return m.itemId === p.itemId; });
+    })[0] || {}).root }, p));
     $('#mcIdImagesWrap').style.display = b ? 'none' : '';
     $('#mcIdName').value = b ? b.query : (p.guessName || p.jellyfinName);
     $('#mcIdYear').value = b ? (b.year || '') : (p.guessYear || '');
@@ -858,6 +879,7 @@
         '<input type="checkbox" class="mc-batch-check" data-i="' + i + '"' + (b.checked ? ' checked' : '') + (r ? '' : ' disabled') + '>' +
         '<img alt="" src="' + esc(poster(b.id, 140)) + '" onerror="this.style.visibility=\'hidden\'">' +
         '<div><b>' + esc(p ? p.jellyfinName : b.id) + '</b> <span class="mc-meta">(' + esc(p && p.year || '?') + ')</span>' +
+          '<div class="mc-where">📁 ' + esc(where(p)) + '</div>' +
           '<div class="mc-meta">' + (b.manual ? '<span class="mc-tag info">manual pick</span> ' : 'searched: ') +
             esc(b.query) + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-batch-manual" data-i="' + i + '" style="margin-top:.3em">' +
@@ -935,7 +957,7 @@
           var best = bestMatch(found.results, b.query, b.year);
           b.pick = best == null ? 0 : best;
           b.confident = best != null;
-          b.checked = best != null;
+          b.checked = false; // nothing is pre-selected; confident matches are only highlighted
         })
         .then(function () { if (run === batchRun) renderBatch(); return next(); });
     }
@@ -1274,9 +1296,18 @@
     else if (e.target.closest('.mc-reset-name')) saveName(id, '');
   });
 
+  // leaving the page must never leave the body scroll-locked or a window open on top of Jellyfin
+  function releaseBody() {
+    $$('.mc-modal').forEach(function (m) { m.hidden = true; });
+    $('#mcDock').hidden = true;
+    document.body.style.overflow = '';
+  }
+  ['pagehide', 'viewbeforehide', 'viewhide'].forEach(function (ev) { page.addEventListener(ev, releaseBody); });
+
   page.addEventListener('pageshow', function () {
     themeBackground();
     stickyOffset();
+    syncDock();
     syncTypeVisibility();
     load();
   });
