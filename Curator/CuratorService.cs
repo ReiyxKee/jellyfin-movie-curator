@@ -1454,6 +1454,24 @@ public class CuratorService
     /// Remove the item's NFO before re-identifying: Jellyfin reads local NFOs first, so an NFO holding the old IDs
     /// would pull the item straight back to the old (wrong) match. Returns how many files were removed.
     /// </summary>
+    /// <summary>Contents of the item's NFO files (path -> text), so a force stop can put them back.</summary>
+    public Dictionary<string, string> BackupNfo(BaseItem item) =>
+        NfoPaths(item).Where(File.Exists).ToDictionary(p => p, p => File.ReadAllText(p));
+
+    /// <summary>Roll back: remove NFOs written since the backup, then write the backed-up ones again.</summary>
+    public void RestoreNfo(BaseItem item, Dictionary<string, string> backup)
+    {
+        foreach (var path in NfoPaths(item).Where(p => File.Exists(p) && !backup.ContainsKey(p)))
+        {
+            File.Delete(path);
+        }
+
+        foreach (var (path, text) in backup)
+        {
+            File.WriteAllText(path, text, new UTF8Encoding(false));
+        }
+    }
+
     public int RemoveNfo(BaseItem item)
     {
         var n = 0;

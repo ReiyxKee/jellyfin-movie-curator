@@ -97,6 +97,11 @@ public class CuratorController : ControllerBase
         return IdentifyQueue.Start(request, _service, _library, _providers, _fileSystem, _logger);
     }
 
+    /// <summary>Stop a job: force=false finishes the current item and skips the rest; force=true aborts now and rolls back the current item.</summary>
+    [HttpPost("IdentifyJobs/{id}/Stop")]
+    public ActionResult<IdentifyJob> StopIdentifyJob([FromRoute] string id, [FromQuery] bool force = false) =>
+        IdentifyQueue.Stop(id, force) is { } job ? job : NotFound();
+
     /// <summary>Progress of an identify job.</summary>
     [HttpGet("IdentifyJobs/{id}")]
     public ActionResult<IdentifyJob> GetIdentifyJob([FromRoute] string id) =>
