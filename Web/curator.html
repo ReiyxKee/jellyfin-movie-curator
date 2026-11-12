@@ -55,6 +55,10 @@
   #MovieCuratorPage .mc-sources-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 16em; padding: .5em .7em; background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
   #MovieCuratorPage .mc-sources-list label { display: flex; gap: .45em; align-items: center; padding: .2em 0; font-size: .9em; cursor: pointer; }
   #MovieCuratorPage .mc-sources-list .mc-note { font-size: .75em; opacity: .65; margin-left: auto; padding-left: 1em; }
+  #MovieCuratorPage .mc-batch-form { display: flex; gap: .35em; flex-wrap: wrap; margin-top: .35em; }
+  #MovieCuratorPage .mc-batch-form .mc-bq { flex: 1; min-width: 10em; }
+  #MovieCuratorPage .mc-batch-form .mc-by { width: 5em; }
+  #MovieCuratorPage .mc-batch-edit { font-size: .82em; cursor: pointer; }
   @media (max-width: 700px) {
     #MovieCuratorPage .mc-batch-row { grid-template-columns: auto 1fr; }
     #MovieCuratorPage .mc-batch-row img, #MovieCuratorPage .mc-batch-row .mc-arrow { display: none; }
@@ -128,8 +132,9 @@
         </span></h3>
       <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match (pre-ticked). Pick another result from the list, or untick to skip.</p>
       <div class="mc-bar">
+        <label title="Tick / untick every row that has a result"><input type="checkbox" id="mcBatchAll" style="transform:scale(1.2)"> Select all</label>
         <span class="mc-source-picker"></span>
-        <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchSearch"><span>Search again</span></button>
+        <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchSearch"><span>Search all again</span></button>
       </div>
       <div class="mc-meta" id="mcBatchStatus"></div>
       <div id="mcBatchList"></div>
@@ -193,7 +198,8 @@
   var batch = [];         // [{ id, query, year, results, pick, checked, confident, status }]
   var available = {};     // type -> metadata source names Jellyfin offers for that library type
   // Sources that rate-limit (and ban) clients: minimum gap between requests in ms
-  var THROTTLE = { 'AniDB': 2500, 'AniList': 800, 'AniSearch': 1200 };
+  var THROTTLE = { 'AniDB': 2500, 'AniSearch': 1200, 'AniList': 800, 'The Open Movie Database': 500, 'TheMovieDb': 300 };
+  var DEFAULT_GAP = 300;
   var NOTES = { 'AniDB': 'strict rate limit, slow', 'The Open Movie Database': 'mostly by IMDb ID' };
 
   // ---------------------------------------------------------------- helpers
@@ -275,8 +281,10 @@
       }
       h += '<div class="mc-meta">' + p.episodeCount + ' episode file(s)' +
         (p.episodesSkipped ? ' · ' + p.episodesSkipped + ' without episode number (left alone)' : '') +
-        (p.season != null ? ' · season for episodes Jellyfin couldn\'t place: <input class="mc-text mc-season" type="number" min="0" max="99" style="width:4.5em;padding:.1em .3em" value="' +
-          p.season + '"> <span class="mc-tag' + (p.seasonSource === 'custom' ? ' info' : '') + '">' + esc(p.seasonSource) + '</span>' : '') +
+        (p.unplacedEpisodes ? '<br>' + p.unplacedEpisodes + ' episode(s) have no season number in Jellyfin; file them under season ' +
+          '<input class="mc-text mc-season" type="number" min="0" max="99" style="width:4.5em;padding:.1em .3em" value="' + p.season + '"> ' +
+          '<span class="mc-tag' + (p.seasonSource === 'custom' ? ' info' : '') + '">' +
+          ({ custom: 'set by you', name: 'from folder name', jellyfin: 'from Jellyfin', 'default': 'default' }[p.seasonSource] || esc(p.seasonSource)) + '</span>' : '') +
         '</div>';
     }
     h += p.warnings.map(function (w) { return '<div class="mc-warn">⚠ ' + esc(w) + '</div>'; }).join('');
@@ -443,7 +451,7 @@
   // ---------------------------------------------------------------- identify (Jellyfin's own Identify API)
   var lastCall = {};
   function throttle(provider) {
-    var gap = THROTTLE[provider] || 0;
+    var gap = THROTTLE[provider] != null ? THROTTLE[provider] : DEFAULT_GAP;
     var wait = Math.max(0, (lastCall[provider] || 0) + gap - Date.now());
     lastCall[provider] = Date.now() + wait;
     return new Promise(function (resolve) { setTimeout(resolve, wait); });
@@ -499,9 +507,16 @@
    */
   function applyMatch(p, result, replaceImages) {
     var relock = $('#mcLockAfter').checked || p.locked;
+    var hadNfo = 0;
     var pre = p.locked ? api('POST', 'Lock', { itemIds: [p.itemId], locked: false }) : Promise.resolve();
     return pre
+      // an NFO with the old IDs would pull the item back to the old match, so take it away first
+      .then(function () { return api('POST', 'RemoveNfo', { itemId: p.itemId }).then(function (n) { hadNfo = n || 0; }); })
       .then(function () { return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result); })
+      // then write a fresh NFO with the new IDs (always if there was one, else when "Write NFO" is on)
+      .then(function () {
+        return hadNfo || $('#mcNfo').checked ? api('POST', 'WriteNfo', { itemId: p.itemId, lockNfo: $('#mcLockNfo').checked }) : null;
+      })
       .then(function () { return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; })
       .then(function () { return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); });
   }
@@ -581,7 +596,15 @@
         '<input type="checkbox" class="mc-batch-check" data-i="' + i + '"' + (b.checked ? ' checked' : '') + (r ? '' : ' disabled') + '>' +
         '<img alt="" src="' + esc(poster(b.id, 140)) + '" onerror="this.style.visibility=\'hidden\'">' +
         '<div><b>' + esc(p ? p.jellyfinName : b.id) + '</b> <span class="mc-meta">(' + esc(p && p.year || '?') + ')</span>' +
-          '<div class="mc-meta">searched: ' + esc(b.query) + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
+          (b.editing
+            ? '<form class="mc-batch-form" data-i="' + i + '">' +
+                '<input class="mc-text mc-bq" value="' + esc(b.query) + '" placeholder="Title, or tt1234567 / tmdb:123 / tvdb:123">' +
+                '<input class="mc-text mc-by" value="' + esc(b.year || '') + '" placeholder="Year" inputmode="numeric">' +
+                '<button is="emby-button" type="submit" class="raised button-submit mc-btn"><span>Search</span></button>' +
+                '<button is="emby-button" type="button" class="raised mc-btn mc-batch-cancel" data-i="' + i + '"><span>Cancel</span></button>' +
+              '</form>'
+            : '<div class="mc-meta">searched: ' + esc(b.query) + (b.year ? ' (' + b.year + ')' : '') +
+                ' · <a class="mc-batch-edit" data-i="' + i + '">✎ Search again</a></div>') +
           (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
         '<span class="mc-arrow">→</span>' +
         (r && r.ImageUrl ? '<img alt="" src="' + esc(r.ImageUrl) + '">' : '<img alt="" style="visibility:hidden">') +
@@ -589,6 +612,11 @@
       '</div>';
     }).join('');
     var n = batch.filter(function (b) { return b.checked; }).length;
+    var pickable = batch.filter(function (b) { return b.results && b.results[b.pick]; }).length;
+    var all = $('#mcBatchAll');
+    all.checked = pickable > 0 && n === pickable;
+    all.indeterminate = n > 0 && n < pickable;
+    all.disabled = !pickable;
     $('#mcBatchApply').disabled = !n;
     $('#mcBatchApply').querySelector('span').textContent = 'Apply checked (' + n + ')';
   }
@@ -599,13 +627,16 @@
     batch.forEach(function (b) { b.results = null; b.pick = 0; b.checked = false; b.confident = false; b.status = ''; });
     $('#mcBatchStatus').textContent = 'Searching ' + batch.length + ' item(s) on ' + providers.join(', ') + '…';
     renderBatch();
-    var queue = batch.slice(), totals = {};
+    var queue = batch.slice(), totals = {}, done = 0;
+    // strictly sequential, top to bottom: one row's sources finish before the next row starts
     function next() {
       var b = queue.shift();
-      if (!b || run !== batchRun) return null;
-      var p = planById(b.id), info = { Name: b.query, ProviderIds: {} };
-      if (b.year) info.Year = b.year;
-      return searchSources(p, info, providers)
+      if (!b || run !== batchRun) return Promise.resolve();
+      var p = planById(b.id);
+      done++;
+      $('#mcBatchStatus').textContent = 'Searching ' + done + ' of ' + batch.length + ': ' + (p ? p.jellyfinName : b.query) +
+        ' (' + providers.join(', ') + ')…';
+      return searchSources(p, queryInfo(b.query, b.year), providers)
         .then(function (found) {
           if (run !== batchRun) return;
           Object.keys(found.counts).forEach(function (k) {
@@ -620,10 +651,7 @@
         })
         .then(function () { if (run === batchRun) renderBatch(); return next(); });
     }
-    // strict sources are throttled per request anyway; with only relaxed sources, search 3 items at a time
-    var strict = providers.some(function (n) { return THROTTLE[n] >= 2000; });
-    var workers = strict ? [next()] : [next(), next(), next()];
-    Promise.all(workers).then(function () {
+    next().then(function () {
       if (run !== batchRun) return;
       var c = batch.filter(function (b) { return b.confident; }).length;
       $('#mcBatchStatus').textContent = c + ' of ' + batch.length + ' have a confident match. Review, then Apply checked. Sources: ' +
@@ -644,6 +672,60 @@
     loadSources().then(function () { renderPickers(); runBatchSearch(); });
   });
   $('#mcBatchSearch').addEventListener('click', runBatchSearch);
+
+  /** Build SearchInfo from a typed query: a title, or an ID like tt1234567 / tmdb:123 / tvdb:123. */
+  function queryInfo(q, y) {
+    var info = { Name: '', ProviderIds: {} }, m;
+    q = (q || '').trim();
+    if (/^tt\d+$/i.test(q)) info.ProviderIds.Imdb = q;
+    else if ((m = /^tmdb:(\d+)$/i.exec(q))) info.ProviderIds.Tmdb = m[1];
+    else if ((m = /^tvdb:(\d+)$/i.exec(q))) info.ProviderIds.Tvdb = m[1];
+    else info.Name = q;
+    if (/^\d{4}$/.test(String(y || '').trim())) info.Year = parseInt(y, 10);
+    return info;
+  }
+
+  /** Re-search a single batch row with its own query (manual re-identify inside the batch). */
+  function searchBatchRow(b) {
+    var p = planById(b.id);
+    b.results = null; b.status = ''; b.checked = false; b.confident = false;
+    renderBatch();
+    return searchSources(p, queryInfo(b.query, b.year), chosenSources()).then(function (found) {
+      b.results = found.results;
+      var best = bestMatch(found.results, b.query, b.year);
+      b.pick = best == null ? 0 : best;
+      b.confident = best != null;
+      // the user asked for this search, so tick the row when there's anything to pick
+      b.checked = found.results.length > 0;
+      b.status = found.results.length ? '' : 'No results (' + countsText(found.counts) + ')';
+      renderBatch();
+    });
+  }
+
+  $('#mcBatchAll').addEventListener('change', function (e) {
+    batch.forEach(function (b) { if (b.results && b.results[b.pick]) b.checked = e.target.checked; });
+    renderBatch();
+  });
+  $('#mcBatchList').addEventListener('click', function (e) {
+    var edit = e.target.closest('.mc-batch-edit'), cancel = e.target.closest('.mc-batch-cancel');
+    if (edit) {
+      batch[parseInt(edit.getAttribute('data-i'), 10)].editing = true;
+      renderBatch();
+      var f = $('#mcBatchList').querySelector('.mc-batch-form .mc-bq');
+      if (f) { f.focus(); f.select(); }
+    } else if (cancel) {
+      batch[parseInt(cancel.getAttribute('data-i'), 10)].editing = false;
+      renderBatch();
+    }
+  });
+  $('#mcBatchList').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var form = e.target.closest('.mc-batch-form'), b = batch[parseInt(form.getAttribute('data-i'), 10)];
+    b.query = form.querySelector('.mc-bq').value.trim() || b.query;
+    b.year = form.querySelector('.mc-by').value.trim();
+    b.editing = false;
+    searchBatchRow(b);
+  });
 
   $('#mcBatchList').addEventListener('change', function (e) {
     var i = parseInt(e.target.getAttribute('data-i'), 10);

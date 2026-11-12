@@ -107,6 +107,9 @@ public class ItemPlan
     /// <summary>Series: the season number used in episode names, and where it came from (custom | jellyfin | name | default).</summary>
     [JsonPropertyName("season")] public int? Season { get; set; }
 
+    /// <summary>Series: episode files Jellyfin has no season number for (they go to <see cref="Season"/>).</summary>
+    [JsonPropertyName("unplacedEpisodes")] public int UnplacedEpisodes { get; set; }
+
     [JsonPropertyName("seasonSource")] public string? SeasonSource { get; set; }
 
     /// <summary>Series: other folders Jellyfin identified as the same show; their episodes merge into this one.</summary>
@@ -948,15 +951,13 @@ public class CuratorService
                 .Select(e => (e, SeasonFor(e, custom, hint).Season)).ToList();
             sources.Add(new SeasonSource(m, mDir, eps));
 
-            if (m == s)
+            var unplaced = eps.Select(x => x.e).Where(e => e.ParentIndexNumber is null).ToList();
+            p.UnplacedEpisodes += unplaced.Count;
+            if (m == s && unplaced.Count > 0)
             {
-                var fallback = eps.Select(x => x.e).FirstOrDefault(e => e.ParentIndexNumber is null or 1);
-                if (fallback != null)
-                {
-                    (var season, var source) = SeasonFor(fallback, custom, hint);
-                    p.Season = season;
-                    p.SeasonSource = source;
-                }
+                (var season, var source) = SeasonFor(unplaced[0], custom, hint);
+                p.Season = season;
+                p.SeasonSource = source;
             }
         }
 
@@ -1158,6 +1159,50 @@ public class CuratorService
         }
 
         return new XDocument(new XDeclaration("1.0", "utf-8", "yes"), x).Declaration + "\n" + x + "\n";
+    }
+
+    // ------------------------------------------------------------------ NFO maintenance for re-identify
+    /// <summary>NFO files that describe this item: "&lt;video&gt;.nfo" / "movie.nfo" for a movie, "tvshow.nfo" for a series.</summary>
+    private static List<string> NfoPaths(BaseItem item)
+    {
+        if (item is Series)
+        {
+            return new List<string> { System.IO.Path.Combine(item.Path.TrimEnd('/'), "tvshow.nfo") };
+        }
+
+        var dir = System.IO.Path.GetDirectoryName(item.Path) ?? string.Empty;
+        return new List<string>
+        {
+            System.IO.Path.Combine(dir, System.IO.Path.GetFileNameWithoutExtension(item.Path) + ".nfo"),
+            System.IO.Path.Combine(dir, "movie.nfo"),
+        };
+    }
+
+    /// <summary>
+    /// Remove the item's NFO before re-identifying: Jellyfin reads local NFOs first, so an NFO holding the old IDs
+    /// would pull the item straight back to the old (wrong) match. Returns how many files were removed.
+    /// </summary>
+    public int RemoveNfo(BaseItem item)
+    {
+        var n = 0;
+        foreach (var path in NfoPaths(item).Where(File.Exists))
+        {
+            File.Delete(path);
+            n++;
+        }
+
+        _logger.LogInformation("Curator: removed {Count} NFO file(s) for {Name} before re-identify", n, item.Name);
+        return n;
+    }
+
+    /// <summary>Write a fresh NFO from the item's current metadata (after re-identify).</summary>
+    public string WriteNfo(BaseItem item, bool lockData)
+    {
+        var path = NfoPaths(item)[0];
+        var root = item is Series ? "tvshow" : "movie";
+        var display = item is Series ? DisplayFor(item, Config.SeriesDisplayTemplate) : DisplayFor(item, Config.DisplayTemplate);
+        File.WriteAllText(path, NfoXml(root, item, display ?? item.Name ?? string.Empty, Ids(item), lockData), new UTF8Encoding(false));
+        return path;
     }
 
     // ------------------------------------------------------------------ lock

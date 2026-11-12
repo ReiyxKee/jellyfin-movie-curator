@@ -27,6 +27,13 @@ public class VerifyRequest
     [JsonPropertyName("verified")] public bool Verified { get; set; } = true;
 }
 
+public class NfoRequest
+{
+    [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    [JsonPropertyName("lockNfo")] public bool LockNfo { get; set; } = true;
+}
+
 public class NameRequest
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
@@ -83,6 +90,16 @@ public class CuratorController : ControllerBase
     [HttpPost("Lock")]
     public async Task<ActionResult<int>> Lock([FromBody] LockRequest request, CancellationToken cancellationToken)
         => await _service.SetLocked(request.ItemIds, request.Locked, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Remove an item's NFO (before re-identifying, so the old IDs in it can't override the new match).</summary>
+    [HttpPost("RemoveNfo")]
+    public ActionResult<int> RemoveNfo([FromBody] NfoRequest request)
+        => Guid.TryParse(request.ItemId, out var id) && _library.GetItemById(id) is { } item ? _service.RemoveNfo(item) : NotFound();
+
+    /// <summary>Write a fresh NFO from the item's current metadata (after re-identifying).</summary>
+    [HttpPost("WriteNfo")]
+    public ActionResult<string> WriteNfo([FromBody] NfoRequest request)
+        => Guid.TryParse(request.ItemId, out var id) && _library.GetItemById(id) is { } item ? _service.WriteNfo(item, request.LockNfo) : NotFound();
 
     /// <summary>Mark the current identification of items as correct ("Looks right"), or unmark it.</summary>
     [HttpPost("Verify")]
