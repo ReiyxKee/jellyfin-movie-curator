@@ -31,6 +31,13 @@
   #MovieCuratorPage .mc-folder { margin-top: .5em; padding: .6em .7em; border-radius: 6px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-folder .mc-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; margin-bottom: .4em; }
   #MovieCuratorPage .mc-folder .mc-name input { flex: 1; min-width: 12em; }
+  #MovieCuratorPage .mc-progress { display: flex; align-items: center; gap: .6em; margin: .35em 0 .1em; font-size: .82em; }
+  #MovieCuratorPage .mc-progress[hidden] { display: none; }
+  #MovieCuratorPage .mc-progress-track { flex: 0 1 26em; height: 6px; border-radius: 3px; background: var(--mc-soft); overflow: hidden; position: relative; }
+  #MovieCuratorPage .mc-progress-fill { height: 100%; width: 0; background: #00a4dc; transition: width .25s ease; }
+  #MovieCuratorPage .mc-progress.mc-indet .mc-progress-fill { position: absolute; width: 35%; animation: mcIndet 1.2s ease-in-out infinite; }
+  #MovieCuratorPage .mc-progress-text { opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  @keyframes mcIndet { 0% { left: -35%; } 100% { left: 100%; } }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
   #MovieCuratorPage .mc-member { display: flex; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
@@ -89,6 +96,7 @@
       <label><input type="checkbox" id="mcOnlyUnlocked"> Unlocked</label>
       <span class="mc-summary" id="mcSummary">Loading…</span>
     </div>
+    <div class="mc-progress" id="mcProgress" hidden><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div>
     <div class="mc-bar">
       <label class="mc-all" title="Select / clear all rows currently shown (respects the filters)">
         <input type="checkbox" id="mcSelectAllBox" style="transform:scale(1.25)"> <span id="mcSelectAllLabel">Select all</span></label>
@@ -128,6 +136,7 @@
           <label id="mcIdImagesWrap"><input type="checkbox" id="mcIdImages" checked> Replace existing images</label>
           <span class="mc-meta" id="mcIdStatus"></span>
         </div>
+        <div class="mc-wide"><div class="mc-progress" id="mcIdProgress" hidden><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div></div>
       </form>
       </div>
       <div class="mc-dialog-body">
@@ -153,6 +162,7 @@
         <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchSearch"><span>Search all again</span></button>
       </div>
       <div class="mc-meta" id="mcBatchStatus"></div>
+      <div class="mc-progress" id="mcBatchProgress" hidden><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div>
       </div>
       <div class="mc-dialog-body">
         <div id="mcBatchList"></div>
@@ -426,8 +436,24 @@
     summary();
   }
 
+  /**
+   * Progress bar: progress('#mcProgress', { done, total, text }) shows "done / total · text";
+   * without total it's an animated "busy" bar (single server request); progress(sel, null) hides it.
+   */
+  function progress(sel, state) {
+    var el = $(sel);
+    if (!el) return;
+    if (!state) { el.hidden = true; return; }
+    var indet = state.total == null;
+    el.hidden = false;
+    el.classList.toggle('mc-indet', indet);
+    el.querySelector('.mc-progress-fill').style.width = indet ? '' : Math.round(100 * state.done / Math.max(1, state.total)) + '%';
+    el.querySelector('.mc-progress-text').textContent = (indet ? '' : state.done + ' / ' + state.total + ' · ') + (state.text || '');
+  }
+
   function load() {
     $('#mcSummary').textContent = 'Loading…';
+    progress('#mcProgress', { text: 'Loading ' + (type === 'series' ? 'series' : 'movies') + ' and building the preview…' });
     var o = opts();
     return api('GET', 'Plan?type=' + o.type + '&rename=' + o.rename + '&episodes=' + o.episodes + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo +
         '&flatten=' + o.flatten)
@@ -435,8 +461,9 @@
         plans = data;
         Object.keys(selected).forEach(function (k) { if (!planById(k)) delete selected[k]; });
         render();
+        progress('#mcProgress', null);
       })
-      .catch(function (e) { $('#mcSummary').textContent = 'Failed to load: ' + e.message; });
+      .catch(function (e) { $('#mcSummary').textContent = 'Failed to load: ' + e.message; progress('#mcProgress', null); });
   }
 
   // ---------------------------------------------------------------- modals
@@ -538,11 +565,11 @@
    * Search only the chosen sources, one request per source (throttled for strict ones), and merge.
    * Resolves { results, counts: { source: n | 'error' } }.
    */
-  function searchSources(p, info, providers) {
+  function searchSources(p, info, providers, onStep) {
     var counts = {}, all = [];
     var chain = Promise.resolve();
-    providers.forEach(function (name) {
-      chain = chain.then(function () { return throttle(name); }).then(function () {
+    providers.forEach(function (name, k) {
+      chain = chain.then(function () { if (onStep) onStep(name, k + 1, providers.length); return throttle(name); }).then(function () {
         return remoteSearch(p, info, name).then(function (res) {
           counts[name] = res.length;
           res.forEach(function (r) { r.SearchProviderName = r.SearchProviderName || name; all.push(r); });
@@ -576,20 +603,27 @@
    * Apply a search result like Jellyfin's Identify. Locked items ignore metadata updates, so unlock first.
    * A match the user picked is a confirmed one: afterwards it's marked "✓ verified" (against the new IDs).
    */
-  function applyMatch(p, result, replaceImages) {
+  function applyMatch(p, result, replaceImages, onStep) {
     var relock = $('#mcLockAfter').checked || p.locked;
     var hadNfo = 0;
+    function step(i, label) { if (onStep) onStep(label, i, 6); }
+    step(0, 'unlocking');
     var pre = p.locked ? api('POST', 'Lock', { itemIds: [p.itemId], locked: false }) : Promise.resolve();
     return pre
       // an NFO with the old IDs would pull the item back to the old match, so take it away first
-      .then(function () { return api('POST', 'RemoveNfo', { itemId: p.itemId }).then(function (n) { hadNfo = n || 0; }); })
-      .then(function () { return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result); })
+      .then(function () { step(1, 'removing old NFO'); return api('POST', 'RemoveNfo', { itemId: p.itemId }).then(function (n) { hadNfo = n || 0; }); })
+      .then(function () {
+        step(2, 'applying match in Jellyfin (fetching metadata)');
+        return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result);
+      })
       // then write a fresh NFO with the new IDs (always if there was one, else when "Write NFO" is on)
       .then(function () {
+        step(3, 'writing new NFO');
         return hadNfo || $('#mcNfo').checked ? api('POST', 'WriteNfo', { itemId: p.itemId, lockNfo: $('#mcLockNfo').checked }) : null;
       })
-      .then(function () { return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; })
-      .then(function () { return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); });
+      .then(function () { step(4, 'locking'); return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; })
+      .then(function () { step(5, 'marking verified'); return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); })
+      .then(function () { step(6, 'done'); });
   }
 
   /**
@@ -628,7 +662,10 @@
     var providers = identifySources || chosenSources();
     $('#mcIdStatus').textContent = 'Searching ' + providers.join(', ') + '…';
     $('#mcIdResults').innerHTML = '';
-    searchSources(p, info, providers).then(function (found) {
+    searchSources(p, info, providers, function (name, k, n) {
+      progress('#mcIdProgress', { done: k - 1, total: n, text: 'searching ' + name });
+    }).then(function (found) {
+      progress('#mcIdProgress', null);
       var results = found.results;
       lastResults = results;
       var best = bestMatch(results, info.Name, y);
@@ -672,10 +709,14 @@
     }
     $('#mcIdStatus').textContent = 'Applying "' + r.Name + '"…';
     $$('.mc-apply-result').forEach(function (x) { x.disabled = true; });
-    applyMatch(p, r, $('#mcIdImages').checked).then(function () {
+    applyMatch(p, r, $('#mcIdImages').checked, function (label, i, n) {
+      progress('#mcIdProgress', { done: i, total: n, text: r.Name + ' · ' + label });
+    }).then(function () {
+      progress('#mcIdProgress', null);
       hideModal('#mcIdentify');
       return load();
     }).catch(function (err) {
+      progress('#mcIdProgress', null);
       $('#mcIdStatus').textContent = 'Could not apply: ' + err.message;
       $$('.mc-apply-result').forEach(function (x) { x.disabled = false; });
     });
@@ -731,7 +772,12 @@
       done++;
       $('#mcBatchStatus').textContent = 'Searching ' + done + ' of ' + todo.length + ': ' + (p ? p.jellyfinName : b.query) +
         ' (' + providers.join(', ') + ')…';
-      return searchSources(p, queryInfo(b.query, b.year), providers)
+      var rowName = p ? p.jellyfinName : b.query;
+      return searchSources(p, queryInfo(b.query, b.year), providers, function (name, k, n) {
+        if (run === batchRun) {
+          progress('#mcBatchProgress', { done: done - 1, total: todo.length, text: rowName + ' · ' + name + ' (' + k + '/' + n + ')' });
+        }
+      })
         .then(function (found) {
           if (run !== batchRun) return;
           Object.keys(found.counts).forEach(function (k) {
@@ -748,6 +794,7 @@
     }
     next().then(function () {
       if (run !== batchRun) return;
+      progress('#mcBatchProgress', null);
       var c = batch.filter(function (b) { return b.confident; }).length;
       $('#mcBatchStatus').textContent = c + ' of ' + batch.length + ' have a confident match. Review, then Apply checked. Sources: ' +
         Object.keys(totals).map(function (k) {
@@ -805,14 +852,20 @@
     var n = 0, chain = Promise.resolve();
     todo.forEach(function (b) {
       chain = chain.then(function () {
-        $('#mcBatchStatus').textContent = 'Applying ' + (++n) + ' of ' + todo.length + '…';
-        return applyMatch(planById(b.id), b.results[b.pick], true)
+        var at = ++n, name = (planById(b.id) || {}).jellyfinName || b.query;
+        $('#mcBatchStatus').textContent = 'Applying ' + at + ' of ' + todo.length + '…';
+        return applyMatch(planById(b.id), b.results[b.pick], true, function (label, i, steps) {
+          // whole-batch bar: finished items plus this item's step fraction
+          progress('#mcBatchProgress', { done: at - 1, total: todo.length, text: name + ' → ' + b.results[b.pick].Name + ' · ' + label + ' (' + i + '/' + steps + ')' });
+        })
           .then(function () { b.status = '✔ applied'; b.checked = false; })
           .catch(function (e) { b.status = 'Failed: ' + e.message; })
           .then(renderBatch);
       });
     });
     chain.then(function () {
+      progress('#mcBatchProgress', { done: todo.length, total: todo.length, text: 'done' });
+      setTimeout(function () { progress('#mcBatchProgress', null); }, 1500);
       $('#mcBatchStatus').textContent = 'Done. Close this window to see the updated list.';
       return load();
     });
@@ -948,10 +1001,12 @@
   function bulkLock(locked) {
     var ids = selectedIds();
     if (!ids.length) return;
+    progress('#mcProgress', { text: (locked ? 'Locking ' : 'Unlocking ') + noun(ids.length) + (type === 'series' ? ' (with episodes)' : '') + '…' });
     api('POST', 'Lock', { itemIds: ids, locked: locked }).then(function (n) {
+      progress('#mcProgress', null);
       Dashboard.alert((locked ? 'Locked ' : 'Unlocked ') + noun(n) + (type === 'series' ? ' (with their episodes)' : '') + '.');
       return load();
-    }).catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Failed: ' + e.message); });
   }
   $('#mcLockSel').addEventListener('click', function () { bulkLock(true); });
   $('#mcCombine').addEventListener('click', function () {
@@ -979,19 +1034,23 @@
     if (!confirm('Apply ' + nOps + ' folder/file change(s) to ' + noun(ids.length) + '?\nYou can undo with "Undo last folder change".')) return;
     var body = opts(); body.itemIds = ids;
     $('#mcSummary').textContent = 'Applying…';
+    progress('#mcProgress', { text: 'Applying ' + nOps + ' folder/file change(s) to ' + noun(ids.length) + ' on the server…' });
     api('POST', 'Apply', body).then(function (r) {
+      progress('#mcProgress', null);
       selected = {};
       Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\nA library scan has started.');
       return load();
-    }).catch(function (e) { Dashboard.alert('Apply failed: ' + e.message); load(); });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Apply failed: ' + e.message); load(); });
   });
 
   $('#mcUndo').addEventListener('click', function () {
     if (!confirm('Undo the most recent folder change? Files go back where they were and NFOs it created are removed.')) return;
+    progress('#mcProgress', { text: 'Undoing the last folder change…' });
     api('POST', 'Undo').then(function (r) {
+      progress('#mcProgress', null);
       Dashboard.alert('Undone: ' + r.done + ' change(s).' + (r.errors.length ? '\n\n' + r.errors.join('\n') : ''));
       return load();
-    }).catch(function (e) { Dashboard.alert('Undo failed: ' + e.message); });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Undo failed: ' + e.message); });
   });
 
   // ---------------------------------------------------------------- row events
