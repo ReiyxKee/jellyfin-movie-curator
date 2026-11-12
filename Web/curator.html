@@ -77,8 +77,8 @@
       <span class="mc-summary" id="mcSummary">Loading…</span>
     </div>
     <div class="mc-bar">
-      <button is="emby-button" type="button" class="raised mc-btn" id="mcSelectAll"><span>Select shown</span></button>
-      <button is="emby-button" type="button" class="raised mc-btn" id="mcSelectNone"><span>Select none</span></button>
+      <label class="mc-all" title="Select / clear all rows currently shown (respects the filters)">
+        <input type="checkbox" id="mcSelectAllBox" style="transform:scale(1.25)"> <span id="mcSelectAllLabel">Select all</span></label>
       <span class="mc-sep"></span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchIdentify" title="Suggest a match for each selected item; review and apply"><span>Identify selected</span></button>
       <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchFolders" title="Apply folder/file changes for the selected items"><span>Adjust folders</span></button>
@@ -332,6 +332,12 @@
     var c = { sus: 0, lock: 0, ops: 0 };
     plans.forEach(function (p) { if (p.suspicious || p.seasonConflict) c.sus++; if (p.locked) c.lock++; if (p.ops.length) c.ops++; });
     var n = selectedIds().length;
+    var shown = visible(), shownSel = shown.filter(function (p) { return selected[p.itemId]; }).length;
+    var box = $('#mcSelectAllBox');
+    box.checked = shown.length > 0 && shownSel === shown.length;
+    box.indeterminate = shownSel > 0 && shownSel < shown.length;
+    box.disabled = !shown.length;
+    $('#mcSelectAllLabel').textContent = 'Select all' + (shown.length !== plans.length ? ' shown (' + shown.length + ')' : '');
     $('#mcSummary').textContent = noun(plans.length) + ' · ' + c.sus + ' to check · ' + c.lock + ' locked · ' + c.ops + ' with folder changes · ' +
       (n ? n + ' selected' : 'none selected');
     ['#mcBatchIdentify', '#mcBatchFolders', '#mcVerifySel', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
@@ -770,8 +776,11 @@
   ['#mcOnlyChanges', '#mcOnlySus', '#mcOnlyUnlocked'].forEach(function (s) { $(s).addEventListener('change', render); });
   $('#mcFilter').addEventListener('input', render);
   $('#mcRefresh').addEventListener('click', load);
-  $('#mcSelectAll').addEventListener('click', function () { visible().forEach(function (p) { selected[p.itemId] = true; }); render(); });
-  $('#mcSelectNone').addEventListener('click', function () { selected = {}; render(); });
+  $('#mcSelectAllBox').addEventListener('change', function (e) {
+    var on = e.target.checked;
+    visible().forEach(function (p) { if (on) selected[p.itemId] = true; else delete selected[p.itemId]; });
+    render();
+  });
 
   /** Confirm (or un-confirm) the current match; also locks when "Lock after identifying / marking correct" is on. */
   function verify(ids, verified) {
