@@ -1,0 +1,453 @@
+<div id="MovieCuratorPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+<style>
+  #MovieCuratorPage .mo-bar { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; margin: .8em 0; }
+  #MovieCuratorPage .mo-bar label { display: inline-flex; gap: .35em; align-items: center; cursor: pointer; }
+  #MovieCuratorPage input.mo-text { padding: .45em .6em; min-width: 14em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 4px; }
+  #MovieCuratorPage .mo-summary { opacity: .8; margin: .3em 0 1em; }
+  #MovieCuratorPage .mo-card { border: 1px solid rgba(128,128,128,.28); border-radius: 6px; padding: .7em .9em; margin: .55em 0; }
+  #MovieCuratorPage .mo-card.mo-sus { border-left: 4px solid #e0a030; }
+  #MovieCuratorPage .mo-head { display: flex; gap: .7em; align-items: flex-start; }
+  #MovieCuratorPage .mo-head > input[type=checkbox] { margin-top: .5em; transform: scale(1.2); }
+  #MovieCuratorPage .mo-main { flex: 1; min-width: 0; }
+  #MovieCuratorPage .mo-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; }
+  #MovieCuratorPage .mo-name input { flex: 1; min-width: 12em; font-size: 1.05em; font-weight: 600; padding: .3em .5em; background: transparent; color: inherit; border: 1px solid transparent; border-radius: 4px; }
+  #MovieCuratorPage .mo-name input:hover, #MovieCuratorPage .mo-name input:focus { border-color: rgba(128,128,128,.5); }
+  #MovieCuratorPage .mo-meta { font-size: .85em; opacity: .75; margin: .2em 0 .3em .55em; word-break: break-word; }
+  #MovieCuratorPage .mo-tag { display: inline-block; font-size: .75em; padding: .1em .5em; border-radius: 999px; background: rgba(128,128,128,.22); }
+  #MovieCuratorPage .mo-tag.warn { background: rgba(224,160,48,.3); }
+  #MovieCuratorPage .mo-tag.custom { background: rgba(0,164,220,.3); }
+  #MovieCuratorPage .mo-tag.lock { background: rgba(82,181,75,.3); }
+  #MovieCuratorPage .mo-ops { font-family: monospace; font-size: .8em; margin: .4em 0 0 .55em; white-space: pre-wrap; word-break: break-all; opacity: .9; }
+  #MovieCuratorPage .mo-warn { color: #e0a030; font-size: .85em; margin-left: .55em; }
+  #MovieCuratorPage .mo-small { font-size: .85em; padding: .25em .7em; min-width: 0; margin: 0; }
+  #MovieCuratorPage details summary { cursor: pointer; font-size: .85em; opacity: .8; margin-left: .55em; }
+  #MovieCuratorPage .mo-search { margin: .6em 0 .2em .55em; padding: .6em; border-radius: 6px; background: rgba(128,128,128,.08); }
+  #MovieCuratorPage .mo-search form { display: flex; gap: .4em; flex-wrap: wrap; }
+  #MovieCuratorPage .mo-search form input.mo-q { flex: 1; }
+  #MovieCuratorPage .mo-search form input.mo-y { width: 5.5em; min-width: 0; }
+  #MovieCuratorPage .mo-res { display: flex; gap: .6em; align-items: flex-start; padding: .45em 0; border-top: 1px solid rgba(128,128,128,.18); }
+  #MovieCuratorPage .mo-res img { width: 46px; height: 69px; object-fit: cover; border-radius: 3px; background: rgba(128,128,128,.2); flex: none; }
+  #MovieCuratorPage .mo-res .mo-res-main { flex: 1; min-width: 0; font-size: .9em; }
+  #MovieCuratorPage .mo-res .mo-res-ov { opacity: .7; font-size: .85em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  #MovieCuratorPage .mo-res.mo-best { background: rgba(82,181,75,.12); border-radius: 4px; }
+</style>
+<div data-role="content">
+<div class="content-primary">
+  <h2 class="sectionTitle">Movie Curator</h2>
+  <p>Groups every movie into its own <code>&lt;Original title&gt; (&lt;Year&gt;)</code> folder, fixes wrong matches (search &amp; pick, or
+     <b>Suggest matches</b> from the file names), and <b>locks</b> movies so batch metadata refreshes leave them alone.
+     A locked <code>.nfo</code> keeps the identification with the files. Files only move when you press <b>Apply</b>.</p>
+
+  <details class="mo-naming" id="moNaming">
+    <summary style="font-size:1em;opacity:1;margin:0"><b>Naming</b> <span class="mo-meta" id="moNamingSummary"></span></summary>
+    <div class="mo-search" style="margin-left:0">
+      <p class="mo-meta" style="margin-left:0">Tokens: <code>{title}</code> (Jellyfin's title), <code>{originalTitle}</code> (falls back to title),
+        <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>. Empty brackets and dangling dashes are removed when a value is missing.</p>
+      <div class="mo-bar" style="margin:.3em 0">
+        <label style="flex:1;min-width:16em">Folder <input class="mo-text" id="moTplFolder" style="flex:1" placeholder="{originalTitle} ({year})"></label>
+        <span class="mo-meta">e.g. <code>{title} - {year}</code>, <code>{year} - {title}</code>, <code>{title} ({year}) [imdbid-{imdb}]</code></span>
+      </div>
+      <div class="mo-bar" style="margin:.3em 0">
+        <label style="flex:1;min-width:16em">File <input class="mo-text" id="moTplFile" style="flex:1" placeholder="(same as folder)"></label>
+      </div>
+      <div class="mo-bar" style="margin:.3em 0">
+        <label style="flex:1;min-width:16em">Display title <input class="mo-text" id="moTplDisplay" style="flex:1" placeholder="(leave Jellyfin's title unchanged)"></label>
+        <span class="mo-meta">e.g. <code>{originalTitle}</code> to show native titles in Jellyfin</span>
+      </div>
+      <label class="mo-meta" style="margin-left:0;display:block">Regex clean-up rules, one per line: <code>pattern =&gt; replacement</code> (applied in order to every generated name)</label>
+      <textarea class="mo-text" id="moRules" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace" placeholder="^劇場版\s* =>&#10;\s*：\s* => - "></textarea>
+      <div class="mo-warn" id="moRulesErr"></div>
+      <div class="mo-meta" style="margin-left:0" id="moExample"></div>
+      <button is="emby-button" type="button" class="raised button-submit mo-small" id="moSaveNaming"><span>Save naming</span></button>
+    </div>
+  </details>
+
+  <div class="mo-bar">
+    <label><input type="checkbox" id="moRename" checked> Rename folders &amp; files</label>
+    <label><input type="checkbox" id="moNfo" checked> Write NFO</label>
+    <label><input type="checkbox" id="moLock" checked> Lock NFO</label>
+    <label><input type="checkbox" id="moLockAfter" checked> Lock movies after fixing a match</label>
+  </div>
+  <div class="mo-bar">
+    <label><input type="checkbox" id="moOnlyChanges"> Only movies with changes</label>
+    <label><input type="checkbox" id="moOnlySus"> Only suspicious matches</label>
+    <label><input type="checkbox" id="moOnlyUnlocked"> Only unlocked</label>
+    <input type="search" class="mo-text" id="moFilter" placeholder="Filter by name or path">
+  </div>
+  <div class="mo-bar">
+    <button is="emby-button" type="button" class="raised" id="moRefresh"><span>Refresh</span></button>
+    <button is="emby-button" type="button" class="raised" id="moSelectAll"><span>Select shown</span></button>
+    <button is="emby-button" type="button" class="raised" id="moSelectNone"><span>Select none</span></button>
+    <button is="emby-button" type="button" class="raised" id="moSuggest" title="Search TMDB using each file name; you accept each suggestion"><span>Suggest matches</span></button>
+    <button is="emby-button" type="button" class="raised" id="moLockSel"><span>Lock selected</span></button>
+    <button is="emby-button" type="button" class="raised" id="moUnlockSel"><span>Unlock selected</span></button>
+    <button is="emby-button" type="button" class="raised button-submit" id="moApply"><span>Apply folder changes</span></button>
+    <button is="emby-button" type="button" class="raised" id="moUndo"><span>Undo last apply</span></button>
+  </div>
+  <div class="mo-summary" id="moSummary">Loading…</div>
+  <div id="moList"></div>
+</div>
+</div>
+
+<script type="text/javascript">
+(function () {
+  var page = document.querySelector('#MovieCuratorPage');
+  var plans = [];
+  var selected = {};
+  var search = {}; // itemId -> { q, y, results, loading, error, best }
+
+  function $(sel) { return page.querySelector(sel); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function opts() {
+    return { rename: $('#moRename').checked, nfo: $('#moNfo').checked, lockNfo: $('#moLock').checked };
+  }
+  function http(method, path, body) {
+    return fetch(ApiClient.getUrl(path), {
+      method: method,
+      headers: { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"', 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      return r.status === 204 ? null : r.json();
+    });
+  }
+  function api(method, path, body) { return http(method, 'MovieCurator/' + path, body); }
+  function planById(id) { return plans.filter(function (p) { return p.itemId === id; })[0]; }
+  function short(p, root) { return root && p.indexOf(root + '/') === 0 ? p.slice(root.length + 1) : p; }
+  function opLine(op, root) {
+    var from = op.from ? op.from.split('/').pop() : '', to = op.to.split('/').pop();
+    switch (op.kind) {
+      case 'mkdir': return '📁 new folder  ' + short(op.to, root) + '/';
+      case 'dirmove': return '📁 rename folder  ' + from + '/  →  ' + to + '/';
+      case 'nfo': return '📝 write ' + to + (op.note ? '  (' + op.note + ')' : '');
+      case 'display': return '🏷 title  ' + op.from + '  →  ' + op.to;
+      default: return '   ' + from + '  →  ' + to + (op.note ? '  (' + op.note + ')' : '');
+    }
+  }
+  function idText(ids) {
+    return Object.keys(ids || {}).sort().map(function (k) { return k + ' ' + ids[k]; }).join(', ') || 'no IDs';
+  }
+
+  // ---------------------------------------------------------------- rendering
+  function searchPanel(p) {
+    var s = search[p.itemId];
+    if (!s) return '';
+    var html = '<div class="mo-search"><form class="mo-search-form">' +
+      '<input class="mo-text mo-q" value="' + esc(s.q) + '" placeholder="Title, or tt1234567 / tmdb:123">' +
+      '<input class="mo-text mo-y" value="' + esc(s.y || '') + '" placeholder="Year">' +
+      '<button is="emby-button" type="submit" class="raised mo-small"><span>Search</span></button>' +
+      '<button is="emby-button" type="button" class="raised mo-small mo-close"><span>Close</span></button></form>';
+    if (s.loading) html += '<div class="mo-meta">Searching…</div>';
+    if (s.error) html += '<div class="mo-warn">' + esc(s.error) + '</div>';
+    if (s.results && !s.results.length) html += '<div class="mo-meta">No results. Try another title or remove the year.</div>';
+    (s.results || []).slice(0, 8).forEach(function (r, i) {
+      html += '<div class="mo-res' + (s.best === i ? ' mo-best' : '') + '">' +
+        (r.ImageUrl ? '<img loading="lazy" src="' + esc(r.ImageUrl) + '">' : '<img alt="">') +
+        '<div class="mo-res-main"><b>' + esc(r.Name) + '</b> (' + esc(r.ProductionYear || '?') + ')' +
+        (s.best === i ? ' <span class="mo-tag lock">suggested</span>' : '') +
+        '<div class="mo-meta" style="margin:0">' + esc(idText(r.ProviderIds)) + ' · ' + esc(r.SearchProviderName || '') + '</div>' +
+        (r.Overview ? '<div class="mo-res-ov">' + esc(r.Overview) + '</div>' : '') + '</div>' +
+        '<button is="emby-button" type="button" class="raised button-submit mo-small mo-use" data-i="' + i + '"><span>Use this</span></button></div>';
+    });
+    return html + '</div>';
+  }
+
+  function card(p) {
+    var tags = [];
+    if (p.locked) tags.push('<span class="mo-tag lock">🔒 locked</span>');
+    if (p.suspicious) tags.push('<span class="mo-tag warn">check match</span>');
+    if (p.titleSource === 'custom') tags.push('<span class="mo-tag custom">custom name</span>');
+    if (p.titleSource === 'filename') tags.push('<span class="mo-tag warn">name from filename</span>');
+    if (!p.ops.length) tags.push('<span class="mo-tag">folder tidy</span>');
+    var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
+    return '<div class="mo-card' + (p.suspicious ? ' mo-sus' : '') + '" data-id="' + p.itemId + '">' +
+      '<div class="mo-head"><input type="checkbox" class="mo-sel"' + (selected[p.itemId] ? ' checked' : '') + '>' +
+      '<div class="mo-main">' +
+        '<div class="mo-name">' +
+          '<input class="mo-title" value="' + esc(p.title) + '" data-orig="' + esc(p.title) + '" title="Folder / file name - edit and press Enter">' +
+          tags.join(' ') +
+          '<button is="emby-button" type="button" class="raised mo-small mo-save" style="display:none"><span>Save name</span></button>' +
+          (p.titleSource === 'custom' ? '<button is="emby-button" type="button" class="raised mo-small mo-reset"><span>Reset name</span></button>' : '') +
+          '<button is="emby-button" type="button" class="raised mo-small mo-open-search"><span>Fix match…</span></button>' +
+          '<button is="emby-button" type="button" class="raised mo-small mo-toggle-lock"><span>' + (p.locked ? 'Unlock' : 'Lock') + '</span></button>' +
+          '<a is="emby-linkbutton" class="raised emby-button mo-small" href="' + detailsUrl + '">Open</a>' +
+        '</div>' +
+        '<div class="mo-meta">Jellyfin: <b>' + esc(p.jellyfinName) + '</b>' +
+          (p.originalTitle && p.originalTitle !== p.jellyfinName ? ' / ' + esc(p.originalTitle) : '') +
+          ' (' + (p.year || '?') + ') · ' + esc(idText(p.providerIds)) + '<br>' + esc(short(p.path, p.root)) + '</div>' +
+        p.warnings.map(function (w) { return '<div class="mo-warn">⚠ ' + esc(w) + '</div>'; }).join('') +
+        searchPanel(p) +
+        (p.ops.length ? '<details' + (p.ops.length <= 4 ? ' open' : '') + '><summary>' + p.ops.length + ' folder/file change(s)</summary>' +
+          '<div class="mo-ops">' + p.ops.map(function (o) { return esc(opLine(o, p.root)); }).join('\n') + '</div></details>' : '') +
+      '</div></div></div>';
+  }
+
+  function visible() {
+    var f = $('#moFilter').value.toLowerCase();
+    return plans.filter(function (p) {
+      if ($('#moOnlyChanges').checked && !p.ops.length && !p.warnings.length) return false;
+      if ($('#moOnlySus').checked && !p.suspicious) return false;
+      if ($('#moOnlyUnlocked').checked && p.locked) return false;
+      if (f && (p.title + ' ' + p.path + ' ' + p.jellyfinName).toLowerCase().indexOf(f) < 0) return false;
+      return true;
+    });
+  }
+
+  function render() {
+    var shown = visible();
+    var c = { ops: 0, sel: 0, sus: 0, lock: 0 };
+    plans.forEach(function (p) {
+      if (p.ops.length) c.ops++; if (selected[p.itemId]) c.sel++; if (p.suspicious) c.sus++; if (p.locked) c.lock++;
+    });
+    $('#moSummary').textContent = plans.length + ' movies · ' + c.sus + ' suspicious · ' + c.lock + ' locked · ' +
+      c.ops + ' with folder changes · ' + c.sel + ' selected · showing ' + shown.length;
+    $('#moList').innerHTML = shown.map(card).join('');
+  }
+
+  function renderCard(id) {
+    var el = page.querySelector('.mo-card[data-id="' + id + '"]');
+    var p = planById(id);
+    if (el && p) el.outerHTML = card(p);
+  }
+
+  function load() {
+    $('#moSummary').textContent = 'Building preview…';
+    var o = opts();
+    return api('GET', 'Plan?rename=' + o.rename + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo).then(function (data) {
+      plans = data;
+      var ids = {};
+      plans.forEach(function (p) { ids[p.itemId] = true; });
+      Object.keys(selected).forEach(function (k) { if (!ids[k]) delete selected[k]; });
+      Object.keys(search).forEach(function (k) { if (!ids[k]) delete search[k]; });
+      render();
+    }).catch(function (e) { $('#moSummary').textContent = 'Failed to load: ' + e.message; });
+  }
+
+  // ---------------------------------------------------------------- identify (Jellyfin's own Identify API)
+  function parseQuery(q, y) {
+    var info = { Name: '', ProviderIds: {} };
+    q = (q || '').trim();
+    var m;
+    if (/^tt\d+$/i.test(q)) info.ProviderIds.Imdb = q;
+    else if ((m = /^tmdb:(\d+)$/i.exec(q))) info.ProviderIds.Tmdb = m[1];
+    else info.Name = q;
+    if (y && /^\d{4}$/.test(String(y).trim())) info.Year = parseInt(y, 10);
+    return info;
+  }
+
+  function runSearch(id, providerName) {
+    var s = search[id];
+    s.loading = true; s.error = null; s.results = null; s.best = null;
+    renderCard(id);
+    var body = { SearchInfo: parseQuery(s.q, s.y), ItemId: id, IncludeDisabledProviders: true };
+    if (providerName) body.SearchProviderName = providerName;
+    return http('POST', 'Items/RemoteSearch/Movie', body).then(function (res) {
+      s.results = res || [];
+      s.best = bestMatch(s.results, s.q, s.y);
+    }).catch(function (e) { s.error = 'Search failed: ' + e.message; })
+      .then(function () { s.loading = false; renderCard(id); });
+  }
+
+  function norm(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9À-￿]+/g, ' ').trim(); }
+  function bestMatch(results, q, y) {
+    if (!results.length) return null;
+    var nq = norm(q), year = parseInt(y, 10), best = null, bestScore = -1;
+    results.slice(0, 8).forEach(function (r, i) {
+      var score = 0, n = norm(r.Name);
+      if (year && r.ProductionYear === year) score += 3;
+      else if (year && r.ProductionYear && Math.abs(r.ProductionYear - year) === 1) score += 1;
+      if (n === nq) score += 3; else if (n.indexOf(nq) === 0 || nq.indexOf(n) === 0) score += 1;
+      score -= i * 0.1;
+      if (score > bestScore) { bestScore = score; best = i; }
+    });
+    return bestScore >= 2.5 ? best : null; // only highlight confident suggestions
+  }
+
+  function openSearch(id, providerName) {
+    var p = planById(id);
+    if (!search[id]) search[id] = { q: p.guessName || p.jellyfinName, y: p.guessYear || '' };
+    return runSearch(id, providerName);
+  }
+
+  function useResult(id, i) {
+    var p = planById(id), r = search[id].results[i];
+    var lockAfter = $('#moLockAfter').checked;
+    $('#moSummary').textContent = 'Applying "' + r.Name + '" to ' + p.jellyfinName + '…';
+    // A locked item ignores metadata updates, so unlock first
+    var pre = p.locked ? api('POST', 'Lock', { itemIds: [id], locked: false }) : Promise.resolve();
+    return pre.then(function () {
+      return http('POST', 'Items/RemoteSearch/Apply/' + id + '?ReplaceAllImages=true', r);
+    }).then(function () {
+      return lockAfter || p.locked ? api('POST', 'Lock', { itemIds: [id], locked: true }) : null;
+    }).then(function () {
+      delete search[id];
+      return load();
+    }).catch(function (e) { Dashboard.alert('Could not apply match: ' + e.message); load(); });
+  }
+
+  // ---------------------------------------------------------------- naming settings
+  var PLUGIN_ID = '7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93';
+  var DEFAULT_FOLDER = '{originalTitle} ({year})';
+
+  function parseRules(text) {
+    var rules = [], errors = [];
+    text.split('\n').forEach(function (line, n) {
+      if (!line.trim()) return;
+      var i = line.indexOf('=>');
+      var pattern = (i < 0 ? line : line.slice(0, i)).trim();
+      var replacement = i < 0 ? '' : line.slice(i + 2).replace(/^ /, '');
+      try { new RegExp(pattern); } catch (e) { errors.push('Line ' + (n + 1) + ': ' + e.message); return; }
+      rules.push({ Pattern: pattern, Replacement: replacement });
+    });
+    return { rules: rules, errors: errors };
+  }
+  function renderTpl(tpl, p, rules) {
+    var tok = {
+      title: p.jellyfinName || '', originaltitle: p.originalTitle || p.jellyfinName || '', year: p.year || '',
+      tmdb: (p.providerIds || {}).Tmdb || '', imdb: (p.providerIds || {}).Imdb || ''
+    };
+    var s = tpl.replace(/\{(\w+)\}/g, function (m, k) { return k.toLowerCase() in tok ? tok[k.toLowerCase()] : m; });
+    s = s.replace(/\(\s*\)|\[\s*\]|\[(imdbid|tmdbid)-\]/gi, '').replace(/\s{2,}/g, ' ').replace(/^[\s\-–—_.]+|[\s\-–—_]+$/g, '').trim();
+    rules.forEach(function (r) { try { s = s.replace(new RegExp(r.Pattern, 'g'), r.Replacement); } catch (e) { /* invalid */ } });
+    return s.trim();
+  }
+  function namingExample() {
+    var r = parseRules($('#moRules').value);
+    $('#moRulesErr').textContent = r.errors.join('  ');
+    var sample = plans.filter(function (p) { return p.providerIds && (p.providerIds.Tmdb || p.providerIds.Imdb) && p.originalTitle && p.originalTitle !== p.jellyfinName; })[0] ||
+      plans.filter(function (p) { return p.providerIds && p.providerIds.Tmdb; })[0];
+    if (!sample) { $('#moExample').textContent = ''; return; }
+    var folder = renderTpl($('#moTplFolder').value || DEFAULT_FOLDER, sample, r.rules);
+    var file = $('#moTplFile').value ? renderTpl($('#moTplFile').value, sample, r.rules) : folder;
+    var display = $('#moTplDisplay').value ? renderTpl($('#moTplDisplay').value, sample, r.rules) : sample.jellyfinName;
+    $('#moExample').innerHTML = 'Example (' + esc(sample.jellyfinName) + '): <code>' + esc(folder) + '/' + esc(file) + '.mkv</code> · shown as <b>' + esc(display) + '</b>';
+  }
+  function loadNaming() {
+    return ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
+      $('#moTplFolder').value = cfg.FolderTemplate || '';
+      $('#moTplFile').value = cfg.FileTemplate || '';
+      $('#moTplDisplay').value = cfg.DisplayTemplate || '';
+      $('#moRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
+      $('#moNamingSummary').textContent = '· folder: ' + (cfg.FolderTemplate || DEFAULT_FOLDER) +
+        (cfg.DisplayTemplate ? ' · title: ' + cfg.DisplayTemplate : '');
+      namingExample();
+    });
+  }
+  $('#moSaveNaming').addEventListener('click', function () {
+    var r = parseRules($('#moRules').value);
+    if (r.errors.length) { Dashboard.alert('Fix the regex rules first:\n' + r.errors.join('\n')); return; }
+    ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
+      cfg.FolderTemplate = $('#moTplFolder').value.trim() || DEFAULT_FOLDER;
+      cfg.FileTemplate = $('#moTplFile').value.trim();
+      cfg.DisplayTemplate = $('#moTplDisplay').value.trim();
+      cfg.CleanupRules = r.rules;
+      return ApiClient.updatePluginConfiguration(PLUGIN_ID, cfg);
+    }).then(function () { return loadNaming(); }).then(load)
+      .catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
+  });
+  ['#moTplFolder', '#moTplFile', '#moTplDisplay', '#moRules'].forEach(function (s) { $(s).addEventListener('input', namingExample); });
+
+  // ---------------------------------------------------------------- events
+  page.addEventListener('pageshow', function () { load().then(loadNaming); });
+  ['#moRename', '#moNfo', '#moLock'].forEach(function (s) { $(s).addEventListener('change', load); });
+  ['#moOnlyChanges', '#moOnlySus', '#moOnlyUnlocked'].forEach(function (s) { $(s).addEventListener('change', render); });
+  $('#moFilter').addEventListener('input', render);
+  $('#moRefresh').addEventListener('click', load);
+  $('#moSelectAll').addEventListener('click', function () { visible().forEach(function (p) { selected[p.itemId] = true; }); render(); });
+  $('#moSelectNone').addEventListener('click', function () { selected = {}; render(); });
+
+  $('#moSuggest').addEventListener('click', function () {
+    var targets = Object.keys(selected);
+    if (!targets.length) targets = visible().filter(function (p) { return p.suspicious; }).map(function (p) { return p.itemId; });
+    if (!targets.length) { Dashboard.alert('Select movies, or show some suspicious ones, first.'); return; }
+    if (targets.length > 40 && !confirm('Search TMDB for ' + targets.length + ' movies?')) return;
+    var queue = targets.slice();
+    function next() { var id = queue.shift(); return id ? openSearch(id, 'TheMovieDb').then(next) : null; }
+    Promise.all([next(), next(), next()]).then(function () {
+      $('#moSummary').textContent += ' · suggestions ready (green = confident match)';
+    });
+  });
+
+  function bulkLock(locked) {
+    var ids = Object.keys(selected);
+    if (!ids.length) { Dashboard.alert('Select movies first.'); return; }
+    api('POST', 'Lock', { itemIds: ids, locked: locked }).then(function (n) {
+      Dashboard.alert((locked ? 'Locked ' : 'Unlocked ') + n + ' movie(s).');
+      return load();
+    }).catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
+  }
+  $('#moLockSel').addEventListener('click', function () { bulkLock(true); });
+  $('#moUnlockSel').addEventListener('click', function () { bulkLock(false); });
+
+  $('#moList').addEventListener('change', function (e) {
+    if (e.target.classList.contains('mo-sel')) {
+      var id = e.target.closest('.mo-card').getAttribute('data-id');
+      if (e.target.checked) selected[id] = true; else delete selected[id];
+      render();
+    }
+  });
+  $('#moList').addEventListener('input', function (e) {
+    var card = e.target.closest('.mo-card');
+    if (!card) return;
+    var id = card.getAttribute('data-id');
+    if (e.target.classList.contains('mo-title')) {
+      card.querySelector('.mo-save').style.display = e.target.value !== e.target.getAttribute('data-orig') ? '' : 'none';
+    }
+    if (e.target.classList.contains('mo-q')) search[id].q = e.target.value;
+    if (e.target.classList.contains('mo-y')) search[id].y = e.target.value;
+  });
+  $('#moList').addEventListener('submit', function (e) {
+    e.preventDefault();
+    runSearch(e.target.closest('.mo-card').getAttribute('data-id'));
+  });
+  function saveName(id, name) {
+    return api('POST', 'Name', { itemId: id, name: name }).then(load)
+      .catch(function (e) { Dashboard.alert('Could not save name: ' + e.message); });
+  }
+  $('#moList').addEventListener('keydown', function (e) {
+    if (e.target.classList.contains('mo-title') && e.key === 'Enter') saveName(e.target.closest('.mo-card').getAttribute('data-id'), e.target.value);
+  });
+  $('#moList').addEventListener('click', function (e) {
+    var card = e.target.closest('.mo-card');
+    if (!card) return;
+    var id = card.getAttribute('data-id'), p = planById(id);
+    if (e.target.closest('.mo-save')) saveName(id, card.querySelector('.mo-title').value);
+    else if (e.target.closest('.mo-reset')) saveName(id, '');
+    else if (e.target.closest('.mo-open-search')) openSearch(id);
+    else if (e.target.closest('.mo-close')) { delete search[id]; renderCard(id); }
+    else if (e.target.closest('.mo-use')) useResult(id, parseInt(e.target.closest('.mo-use').getAttribute('data-i'), 10));
+    else if (e.target.closest('.mo-toggle-lock')) {
+      api('POST', 'Lock', { itemIds: [id], locked: !p.locked }).then(load)
+        .catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+    }
+  });
+
+  $('#moApply').addEventListener('click', function () {
+    var ids = Object.keys(selected).filter(function (id) { var p = planById(id); return p && p.ops.length; });
+    if (!ids.length) { Dashboard.alert('Select movies that have folder changes first.'); return; }
+    var nOps = ids.reduce(function (n, id) { return n + planById(id).ops.length; }, 0);
+    if (!confirm('Apply ' + nOps + ' folder/file change(s) to ' + ids.length + ' movie(s)? You can undo with "Undo last apply".')) return;
+    var body = opts(); body.itemIds = ids;
+    $('#moSummary').textContent = 'Applying…';
+    api('POST', 'Apply', body).then(function (r) {
+      selected = {};
+      Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') +
+        '\n\nA library scan has started.');
+      return load();
+    }).catch(function (e) { Dashboard.alert('Apply failed: ' + e.message); load(); });
+  });
+
+  $('#moUndo').addEventListener('click', function () {
+    if (!confirm('Undo the most recent apply? Files go back where they were and NFOs it created are removed.')) return;
+    api('POST', 'Undo').then(function (r) {
+      Dashboard.alert('Undone: ' + r.done + ' change(s).' + (r.errors.length ? '\n\n' + r.errors.join('\n') : ''));
+      return load();
+    }).catch(function (e) { Dashboard.alert('Undo failed: ' + e.message); });
+  });
+})();
+</script>
+</div>

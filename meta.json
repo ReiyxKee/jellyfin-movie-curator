@@ -1,0 +1,15 @@
+{
+  "category": "General",
+  "changelog": "Initial release",
+  "description": "Preview and apply a clean '<Original title> (<Year>)' movie folder layout, rename subtitles/artwork to match, and write locked NFO files.",
+  "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
+  "name": "Movie Curator",
+  "overview": "Organize movie folders and keep identifications in NFO files",
+  "owner": "Reiyx",
+  "targetAbi": "10.11.0.0",
+  "timestamp": "__TIMESTAMP__",
+  "version": "1.0.0.0",
+  "status": "Active",
+  "autoUpdate": false,
+  "assemblies": []
+}

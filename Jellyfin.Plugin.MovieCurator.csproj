@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.MovieCurator</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.MovieCurator</AssemblyName>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>Reiyx</Authors>
+    <Copyright>Copyright (C) 2026 Reiyx</Copyright>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Provided by the Jellyfin server at runtime, so don't copy them into the plugin -->
+    <PackageReference Include="Jellyfin.Controller" Version="10.11.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Model" Version="10.11.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Web\curator.html" />
+    <EmbeddedResource Include="Web\curator.html" />
+  </ItemGroup>
+
+</Project>
