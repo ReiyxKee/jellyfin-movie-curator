@@ -29,6 +29,12 @@ public class PlanOptions
 
     [JsonPropertyName("lockNfo")] public bool LockNfo { get; set; } = true;
 
+    /// <summary>
+    /// Move items out of collection / container folders to the library root: movies in "Rush Hour 1-3/" and
+    /// shows inside "Fate Series/" each get their own top-level folder.
+    /// </summary>
+    [JsonPropertyName("flatten")] public bool Flatten { get; set; } = true;
+
     public bool IsSeries => string.Equals(Type, "series", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -111,6 +117,9 @@ public class ItemPlan
     [JsonPropertyName("unplacedEpisodes")] public int UnplacedEpisodes { get; set; }
 
     [JsonPropertyName("seasonSource")] public string? SeasonSource { get; set; }
+
+    /// <summary>Series: this folder only holds other shows (e.g. "Fate Series/Fate Zero/…"); their folder names.</summary>
+    [JsonPropertyName("containerShows")] public List<string> ContainerShows { get; set; } = new();
 
     /// <summary>Series: other folders Jellyfin identified as the same show; their episodes merge into this one.</summary>
     [JsonPropertyName("mergedFolders")] public List<string> MergedFolders { get; set; } = new();
@@ -269,6 +278,67 @@ public class CuratorService
                 && n.StartsWith(stem, StringComparison.Ordinal) && n.Length > stem.Length
                 && (n[stem.Length] == '.' || n[stem.Length] == '-');
         }).ToList();
+    }
+
+    /// <summary>Subfolder names that mean "part of this show" rather than "another show".</summary>
+    private static readonly Regex SeasonLike = new(
+        @"^(season|series|s|staffel|saison|temporada)\s*\d+\b|^\d+(st|nd|rd|th)\s+season\b|^specials?$|^第\s*\S+\s*[期季]$|^\d{1,2}$"
+        + @"|^(extras?|bonus|ova|ovas|oad|nced|ncop|nc|menu|bd extras|bluray extras|featurettes|trailers|other|subs?|subtitles)$",
+        RegexOptions.IgnoreCase);
+
+    private static readonly HashSet<string> GenericWords = new(StringComparer.Ordinal)
+        { "series", "collection", "movies", "movie", "the", "season", "complete", "saga", "franchise" };
+
+    /// <summary>
+    /// A container folder holds no videos itself, only 2+ subfolders with videos whose names look like separate
+    /// shows (not "Season 1", "S2", "Specials", "OVA"…). Returns those subfolders, or null.
+    /// </summary>
+    private static List<string>? ContainerChildren(string dir)
+    {
+        if (Directory.EnumerateFiles(dir).Any(IsVideo))
+        {
+            return null;
+        }
+
+        var kids = Directory.GetDirectories(dir)
+            .Where(d => !IsJunk(d) && HasVideosBelow(d))
+            .OrderBy(d => d, StringComparer.Ordinal)
+            .ToList();
+        if (kids.Count < 2 || kids.Any(k => SeasonLike.IsMatch(System.IO.Path.GetFileName(k).Trim())))
+        {
+            return null;
+        }
+
+        return kids;
+    }
+
+    private static IEnumerable<string> Words(string s) =>
+        Regex.Split(s.ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(w => w.Length > 0 && !GenericWords.Contains(w));
+
+    private static bool SharesWord(string a, string b)
+    {
+        var wa = Words(a).ToList();
+        var wb = Words(b).ToList();
+        return wa.Any(x => wb.Contains(x) || (x.Length >= 3 && wb.Any(y => y.Length >= 3 && (y.Contains(x, StringComparison.Ordinal) || x.Contains(y, StringComparison.Ordinal)))));
+    }
+
+    /// <summary>"Fate Series" + "1. Fate Zero [BD]" -> "Fate Zero"; "Date A Live" + "Movie" -> "Date A Live - Movie".</summary>
+    private static string FlattenName(string container, string child)
+    {
+        var c = CleanName(Regex.Replace(child, @"^\s*\d{1,2}\s*[.)\-]\s*", string.Empty));
+        c = Regex.Replace(c, @"_+", " ").Trim(' ', '-', '.'); // "[Hi10]_Highschool_DxD_BorN_[BD]" -> "Highschool DxD BorN"
+        c = Regex.Replace(c, @"\s{2,}", " ");
+        if (c.Length == 0)
+        {
+            c = child;
+        }
+
+        if (!SharesWord(container, c))
+        {
+            c = CleanName(container) + " - " + c;
+        }
+
+        return Safe(c);
     }
 
     private static Dictionary<string, string> Ids(BaseItem item) =>
@@ -667,7 +737,7 @@ public class CuratorService
             {
                 try
                 {
-                    var plan = PlanMovie(movie, dir, siblings, layout, opt, ctx);
+                    var plan = PlanMovie(movie, dir, siblings, layout, opt, ctx, root);
                     plan.Root = root;
                     plans.Add(plan);
                 }
@@ -681,7 +751,7 @@ public class CuratorService
         return plans;
     }
 
-    private static ItemPlan PlanMovie(Movie m, string dir, List<string> siblings, string layout, PlanOptions opt, Ctx ctx)
+    private static ItemPlan PlanMovie(Movie m, string dir, List<string> siblings, string layout, PlanOptions opt, Ctx ctx, string root)
     {
         var stem = System.IO.Path.GetFileNameWithoutExtension(m.Path);
         var names = MovieNames(m, layout == "single" ? System.IO.Path.GetFileName(dir) : stem);
@@ -714,13 +784,21 @@ public class CuratorService
 
         // 1. where the movie's folder ends up
         string target, final;
+        var flattenFrom = (string?)null; // collection folder this movie leaves when flattening
         if (layout == "single")
         {
             target = dir;
-            final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, title) : dir;
+            var parent = System.IO.Path.GetDirectoryName(dir)!;
+            var newParent = opt.Flatten && root.Length > 0 && parent != root ? root : parent;
+            flattenFrom = newParent != parent ? parent : null;
+            final = opt.Rename || flattenFrom != null
+                ? System.IO.Path.Combine(newParent, opt.Rename ? title : System.IO.Path.GetFileName(dir))
+                : dir;
         }
         else
         {
+            var baseDir = opt.Flatten && layout == "shared" && root.Length > 0 ? root : dir;
+            flattenFrom = baseDir != dir ? dir : null;
             var existing = Directory.GetDirectories(dir).Where(d =>
             {
                 var k = BaseKey(IdTag.Replace(System.IO.Path.GetFileName(d), string.Empty));
@@ -729,11 +807,13 @@ public class CuratorService
             if (existing.Count == 1 && !Directory.GetFiles(existing[0]).Any(IsVideo))
             {
                 target = existing[0];
-                final = opt.Rename ? System.IO.Path.Combine(dir, title) : target;
+                final = opt.Rename || flattenFrom != null
+                    ? System.IO.Path.Combine(baseDir, opt.Rename ? title : System.IO.Path.GetFileName(existing[0]))
+                    : target;
             }
             else
             {
-                target = final = System.IO.Path.Combine(dir, title);
+                target = final = System.IO.Path.Combine(baseDir, title);
                 if (Directory.Exists(target) && Directory.GetFiles(target).Any(IsVideo))
                 {
                     p.Warnings.Add($"Skipped: folder '{title}' already holds another video (duplicate or wrong match?)");
@@ -761,10 +841,17 @@ public class CuratorService
             PlanOrphanSubs(p, ctx, dir, target, handled, names.File, m.ProductionYear);
         }
 
-        // 4. folder rename
+        // 4. folder rename (and/or move up out of a collection folder)
         if (final != target)
         {
-            Move(p, ctx, target, final, "dirmove");
+            Move(p, ctx, target, final, "dirmove",
+                System.IO.Path.GetDirectoryName(final) != System.IO.Path.GetDirectoryName(target) ? "flatten" : null);
+        }
+
+        // 4b. the collection folder goes once it's empty (checked when applying, so the last movie out removes it)
+        if (flattenFrom != null)
+        {
+            p.Ops.Add(new PlanOp { Kind = "rmdir", To = flattenFrom, Note = "if empty after flatten" });
         }
 
         p.FinalPath = System.IO.Path.Combine(final, newStem + System.IO.Path.GetExtension(m.Path));
@@ -935,10 +1022,41 @@ public class CuratorService
         var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
 
-        // 0. display title
+        // 0. container folder ("Fate Series/" holding Fate Zero, UBW…): move each show up to the library root.
+        //    After the rescan each is identified on its own; shows that turn out to be the same are then merged
+        //    (as seasons) by the same-ID merge below. Nothing else is done to the container itself.
+        if (members.Count == 1 && ContainerChildren(dir) is { } kids)
+        {
+            p.ContainerShows = kids.Select(k => System.IO.Path.GetFileName(k)).ToList();
+            if (opt.Flatten)
+            {
+                var parentDir = System.IO.Path.GetDirectoryName(dir)!;
+                foreach (var kid in kids)
+                {
+                    var name = FlattenName(System.IO.Path.GetFileName(dir), System.IO.Path.GetFileName(kid));
+                    Move(p, ctx, kid, System.IO.Path.Combine(parentDir, name), "dirmove", "flatten");
+                }
+
+                p.Ops.Add(new PlanOp { Kind = "rmdir", To = dir, Note = "if empty after flatten" });
+                var leftovers = Directory.GetFiles(dir).Where(f => !IsJunk(f)).Select(System.IO.Path.GetFileName).ToList();
+                if (leftovers.Count > 0)
+                {
+                    p.Warnings.Add($"'{System.IO.Path.GetFileName(dir)}' keeps {leftovers.Count} file(s) ({string.Join(", ", leftovers.Take(3))}), so it stays; delete it by hand afterwards.");
+                }
+
+                p.Warnings.Add($"Container folder: its {kids.Count} shows move up and become separate shows. After the library scan, "
+                    + "identify each one; shows that turn out to be the same are then combined here as seasons.");
+                return p;
+            }
+
+            p.Warnings.Add($"This folder holds {kids.Count} separate shows ({string.Join(", ", p.ContainerShows.Take(3))}…). "
+                + "Jellyfin treats them as one show; turn on 'Flatten collection folders' to split them.");
+        }
+
+        // 1. display title
         AddDisplayOp(p, s, names.Display);
 
-        // 1. season of every episode, per source folder (each folder can carry its own "Season 2" hint)
+        // 2. season of every episode, per source folder (each folder can carry its own "Season 2" hint)
         var sources = new List<SeasonSource>();
         foreach (var m in members)
         {

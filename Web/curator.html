@@ -167,6 +167,8 @@
         <label><input type="checkbox" id="mcLockNfo" checked> Lock NFO</label>
         <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying / marking correct</label>
         <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
+        <label title="Movies in 'Rush Hour 1-3/' and shows inside 'Fate Series/' each get their own top-level folder">
+          <input type="checkbox" id="mcFlatten" checked> Flatten collection folders</label>
       </div>
 
       <p class="mc-meta">Tokens: <code>{title}</code>, <code>{originalTitle}</code> (falls back to title), <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>, <code>{tvdb}</code>.
@@ -242,6 +244,7 @@
   function opts() {
     return {
       type: type, rename: $('#mcRename').checked, episodes: type === 'series' && $('#mcEpisodes').checked,
+      flatten: $('#mcFlatten').checked,
       nfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
     };
   }
@@ -270,8 +273,11 @@
     var from = op.from ? op.from.split('/').pop() : '', to = op.to.split('/').pop();
     switch (op.kind) {
       case 'mkdir': return '📁 new folder  ' + short(op.to, root) + '/';
-      case 'dirmove': return '📁 rename folder  ' + from + '/  →  ' + to + '/';
-      case 'rmdir': return '🗑 remove empty folder  ' + short(op.to, root) + '/';
+      case 'dirmove':
+        return op.note === 'flatten'
+          ? '📤 move up  ' + short(op.from, root) + '/  →  ' + short(op.to, root) + '/'
+          : '📁 rename folder  ' + from + '/  →  ' + to + '/';
+      case 'rmdir': return '🗑 remove folder  ' + short(op.to, root) + '/  (' + (op.note || 'empty after moves') + ')';
       case 'nfo': return '📝 write ' + to + (op.note ? '  (' + op.note + ')' : '');
       case 'display': return '🏷 title  ' + op.from + '  →  ' + op.to;
       default:
@@ -314,6 +320,7 @@
     if (p.suspicious) tags.push('<span class="mc-tag warn">check match</span>');
     if (p.verified) tags.push('<span class="mc-tag ok">✓ verified</span>');
     if (p.seasonConflict) tags.push('<span class="mc-tag warn">season numbering conflict</span>');
+    if (p.containerShows && p.containerShows.length) tags.push('<span class="mc-tag info">📦 ' + p.containerShows.length + ' shows inside</span>');
     if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
     var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
@@ -379,7 +386,8 @@
   function load() {
     $('#mcSummary').textContent = 'Loading…';
     var o = opts();
-    return api('GET', 'Plan?type=' + o.type + '&rename=' + o.rename + '&episodes=' + o.episodes + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo)
+    return api('GET', 'Plan?type=' + o.type + '&rename=' + o.rename + '&episodes=' + o.episodes + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo +
+        '&flatten=' + o.flatten)
       .then(function (data) {
         plans = data;
         Object.keys(selected).forEach(function (k) { if (!planById(k)) delete selected[k]; });
@@ -858,7 +866,7 @@
   });
   ['#mcTplFolder', '#mcTplFile', '#mcTplDisplay', '#mcTplSeries', '#mcTplSeason', '#mcTplEpisode', '#mcTplSeriesDisplay', '#mcRules']
     .forEach(function (s) { $(s).addEventListener('input', namingExample); });
-  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes'].forEach(function (s) { $(s).addEventListener('change', load); });
+  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes', '#mcFlatten'].forEach(function (s) { $(s).addEventListener('change', load); });
 
   // ---------------------------------------------------------------- panel events
   function setType(t) {
