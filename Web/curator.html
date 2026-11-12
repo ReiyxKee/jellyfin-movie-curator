@@ -38,6 +38,12 @@
   #MovieCuratorPage .mc-modal[hidden] { display: none; }
   #MovieCuratorPage .mc-dialog { background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 8px; width: min(900px, 100%); padding: 1em 1.2em; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
   #MovieCuratorPage .mc-dialog h3 { margin: 0 0 .6em; display: flex; justify-content: space-between; align-items: center; gap: 1em; }
+  /* dialogs with a fixed header: only the body scrolls */
+  #MovieCuratorPage .mc-dialog.mc-split { padding: 0; max-height: 92vh; display: flex; flex-direction: column; }
+  #MovieCuratorPage .mc-split > .mc-dialog-head { flex: none; padding: 1em 1.2em .6em; border-bottom: 1px solid var(--mc-line); position: relative; z-index: 2; background: var(--mc-bg); border-radius: 8px 8px 0 0; }
+  #MovieCuratorPage .mc-split > .mc-dialog-body { flex: 1; min-height: 0; overflow: auto; padding: .4em 1.2em 1em; }
+  /* the search window can open on top of the batch window */
+  #MovieCuratorPage #mcIdentify { z-index: 1010; }
   #MovieCuratorPage .mc-form { display: grid; grid-template-columns: 1fr 6em; gap: .5em; }
   #MovieCuratorPage .mc-form .mc-wide { grid-column: 1 / -1; }
   #MovieCuratorPage .mc-form .mc-ids { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: .5em; }
@@ -55,10 +61,6 @@
   #MovieCuratorPage .mc-sources-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 16em; padding: .5em .7em; background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
   #MovieCuratorPage .mc-sources-list label { display: flex; gap: .45em; align-items: center; padding: .2em 0; font-size: .9em; cursor: pointer; }
   #MovieCuratorPage .mc-sources-list .mc-note { font-size: .75em; opacity: .65; margin-left: auto; padding-left: 1em; }
-  #MovieCuratorPage .mc-batch-form { display: flex; gap: .35em; flex-wrap: wrap; margin-top: .35em; }
-  #MovieCuratorPage .mc-batch-form .mc-bq { flex: 1; min-width: 10em; }
-  #MovieCuratorPage .mc-batch-form .mc-by { width: 5em; }
-  #MovieCuratorPage .mc-batch-edit { font-size: .82em; cursor: pointer; }
   @media (max-width: 700px) {
     #MovieCuratorPage .mc-batch-row { grid-template-columns: auto 1fr; }
     #MovieCuratorPage .mc-batch-row img, #MovieCuratorPage .mc-batch-row .mc-arrow { display: none; }
@@ -100,7 +102,8 @@
 
   <!-- ============================================================ identify modal -->
   <div class="mc-modal" id="mcIdentify" hidden>
-    <div class="mc-dialog">
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
       <h3><span id="mcIdTitle">Identify</span>
         <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button></h3>
       <form class="mc-form" id="mcIdForm">
@@ -112,32 +115,40 @@
           <input class="mc-text" id="mcIdTvdb" placeholder="TVDB ID">
         </div>
         <div class="mc-wide mc-bar" style="margin:0">
-          <span class="mc-source-picker"></span>
+          <span class="mc-source-picker" data-scope="identify"></span>
           <button is="emby-button" type="submit" class="raised button-submit mc-btn"><span>Search</span></button>
-          <label><input type="checkbox" id="mcIdImages" checked> Replace existing images</label>
+          <label id="mcIdImagesWrap"><input type="checkbox" id="mcIdImages" checked> Replace existing images</label>
           <span class="mc-meta" id="mcIdStatus"></span>
         </div>
       </form>
-      <div class="mc-results" id="mcIdResults"></div>
+      </div>
+      <div class="mc-dialog-body">
+        <div class="mc-results" id="mcIdResults"></div>
+      </div>
     </div>
   </div>
 
   <!-- ============================================================ batch identify modal -->
   <div class="mc-modal" id="mcBatch" hidden>
-    <div class="mc-dialog">
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
       <h3><span>Identify selected</span>
         <span class="mc-bar" style="margin:0">
           <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchApply"><span>Apply checked</span></button>
           <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
         </span></h3>
-      <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match (pre-ticked). Pick another result from the list, or untick to skip.</p>
+      <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match (pre-ticked). Pick another result from a row's list,
+        use <b>🔍 Manual search</b> to find it yourself (any source, name or ID), or untick to skip. Nothing changes until <b>Apply checked</b>.</p>
       <div class="mc-bar">
         <label title="Tick / untick every row that has a result"><input type="checkbox" id="mcBatchAll" style="transform:scale(1.2)"> Select all</label>
-        <span class="mc-source-picker"></span>
+        <span class="mc-source-picker" data-scope="batch"></span>
         <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchSearch"><span>Search all again</span></button>
       </div>
       <div class="mc-meta" id="mcBatchStatus"></div>
-      <div id="mcBatchList"></div>
+      </div>
+      <div class="mc-dialog-body">
+        <div id="mcBatchList"></div>
+      </div>
     </div>
   </div>
 
@@ -195,6 +206,9 @@
   var selected = {};
   var open = {};          // itemId -> folder panel expanded
   var identifyId = null;  // item shown in the identify modal
+  var identifyMode = 'apply'; // 'apply' (Re-identify) or 'pick' (manual search for a batch row)
+  var pickIndex = null;       // batch row a 'pick' search fills
+  var identifySources = null; // sources ticked in the search window (only for that search)
   var batch = [];         // [{ id, query, year, results, pick, checked, confident, status }]
   var available = {};     // type -> metadata source names Jellyfin offers for that library type
   // Sources that rate-limit (and ban) clients: minimum gap between requests in ms
@@ -389,7 +403,9 @@
     });
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') $$('.mc-modal').forEach(function (m) { if (!m.hidden) hideModal('#' + m.id); });
+    if (e.key !== 'Escape') return;
+    var top = ['#mcIdentify', '#mcBatch', '#mcNaming'].filter(function (s) { return !$(s).hidden; })[0];
+    if (top) { hideModal(top); if (top === '#mcBatch') batchRun++; }
   });
 
   // ---------------------------------------------------------------- search sources
@@ -422,16 +438,20 @@
       .catch(function () { available[t2] = ['TheMovieDb']; return available[t2]; });
   }
 
-  function renderPickers() {
-    var list = available[type] || [], chosen = chosenSources();
-    var html = '<details class="mc-sources"><summary>Sources: ' + esc(chosen.join(', ') || 'none') + ' ▾</summary><div class="mc-sources-list">' +
+  function pickerHtml(chosen) {
+    var list = available[type] || [];
+    return '<details class="mc-sources"><summary>Sources: ' + esc(chosen.join(', ') || 'none') + ' ▾</summary><div class="mc-sources-list">' +
       list.map(function (n) {
         return '<label><input type="checkbox" class="mc-source" value="' + esc(n) + '"' + (chosen.indexOf(n) >= 0 ? ' checked' : '') + '> ' + esc(n) +
           (NOTES[n] ? '<span class="mc-note">' + esc(NOTES[n]) + '</span>' : '') + '</label>';
       }).join('') + '</div></details>';
+  }
+  /** The batch picker sets the remembered sources; the search window's picker only affects that one search. */
+  function renderPickers() {
     $$('.mc-source-picker').forEach(function (el) {
+      var chosen = el.getAttribute('data-scope') === 'identify' ? (identifySources || chosenSources()) : chosenSources();
       var wasOpen = el.querySelector('details') && el.querySelector('details').open;
-      el.innerHTML = html;
+      el.innerHTML = pickerHtml(chosen);
       if (wasOpen) el.querySelector('details').open = true;
     });
   }
@@ -440,7 +460,7 @@
     var picker = e.target.closest('.mc-source-picker');
     var list = Array.prototype.slice.call(picker.querySelectorAll('.mc-source:checked')).map(function (x) { return x.value; });
     if (!list.length) { e.target.checked = true; return; } // keep at least one
-    saveSources(list);
+    if (picker.getAttribute('data-scope') === 'identify') identifySources = list; else saveSources(list);
     renderPickers();
   });
   // close an open source dropdown when clicking elsewhere
@@ -521,12 +541,20 @@
       .then(function () { return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); });
   }
 
-  function openIdentify(id) {
-    var p = planById(id);
+  /**
+   * mode 'apply': Re-identify a row (Apply syncs to Jellyfin straight away).
+   * mode 'pick' : manual search for batch row `index` (Use this puts the result into the batch table).
+   */
+  function openIdentify(id, mode, index) {
+    var p = planById(id), b = mode === 'pick' ? batch[index] : null;
     identifyId = id;
-    $('#mcIdTitle').textContent = 'Identify: ' + p.jellyfinName;
-    $('#mcIdName').value = p.guessName || p.jellyfinName;
-    $('#mcIdYear').value = p.guessYear || '';
+    identifyMode = mode || 'apply';
+    pickIndex = b ? index : null;
+    identifySources = chosenSources();
+    $('#mcIdTitle').textContent = (b ? 'Find a match for: ' : 'Identify: ') + p.jellyfinName;
+    $('#mcIdImagesWrap').style.display = b ? 'none' : '';
+    $('#mcIdName').value = b ? b.query : (p.guessName || p.jellyfinName);
+    $('#mcIdYear').value = b ? (b.year || '') : (p.guessYear || '');
     $('#mcIdImdb').value = '';
     $('#mcIdTmdb').value = '';
     $('#mcIdTvdb').value = '';
@@ -546,7 +574,7 @@
     if ($('#mcIdImdb').value.trim()) info.ProviderIds.Imdb = $('#mcIdImdb').value.trim();
     if ($('#mcIdTmdb').value.trim()) info.ProviderIds.Tmdb = $('#mcIdTmdb').value.trim();
     if ($('#mcIdTvdb').value.trim()) info.ProviderIds.Tvdb = $('#mcIdTvdb').value.trim();
-    var providers = chosenSources();
+    var providers = identifySources || chosenSources();
     $('#mcIdStatus').textContent = 'Searching ' + providers.join(', ') + '…';
     $('#mcIdResults').innerHTML = '';
     searchSources(p, info, providers).then(function (found) {
@@ -561,7 +589,8 @@
           '<b>' + esc(r.Name) + '</b><span class="mc-meta">' + esc(r.ProductionYear || '?') + ' · ' + esc(r.SearchProviderName || '') + '</span>' +
           '<span class="mc-meta">' + esc(idText(r.ProviderIds)) + '</span>' +
           (r.Overview ? '<span class="mc-ov">' + esc(r.Overview) + '</span>' : '') +
-          '<button is="emby-button" type="button" class="raised button-submit mc-btn mc-apply-result" data-i="' + i + '"><span>Apply</span></button>' +
+          '<button is="emby-button" type="button" class="raised button-submit mc-btn mc-apply-result" data-i="' + i + '"><span>' +
+            (identifyMode === 'pick' ? 'Use this' : 'Apply') + '</span></button>' +
         '</div>';
       }).join('');
     }).catch(function (e) { $('#mcIdStatus').textContent = 'Search failed: ' + e.message; });
@@ -572,6 +601,24 @@
     var b = e.target.closest('.mc-apply-result');
     if (!b) return;
     var p = planById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
+    if (identifyMode === 'pick') {
+      // put the chosen result into the batch row; nothing is applied until "Apply checked"
+      var row = batch[pickIndex];
+      if (row) {
+        var others = (row.results || []).filter(function (x) { return JSON.stringify(x.ProviderIds) !== JSON.stringify(r.ProviderIds); });
+        row.results = [r].concat(others);
+        row.pick = 0;
+        row.checked = true;
+        row.confident = false;
+        row.manual = true;
+        row.query = $('#mcIdName').value.trim() || row.query;
+        row.year = $('#mcIdYear').value.trim();
+        row.status = '';
+      }
+      hideModal('#mcIdentify');
+      renderBatch();
+      return;
+    }
     $('#mcIdStatus').textContent = 'Applying "' + r.Name + '"…';
     $$('.mc-apply-result').forEach(function (x) { x.disabled = true; });
     applyMatch(p, r, $('#mcIdImages').checked).then(function () {
@@ -588,7 +635,7 @@
     $('#mcBatchList').innerHTML = batch.map(function (b, i) {
       var p = planById(b.id), r = b.results && b.results[b.pick];
       var choice = b.results === null ? '<span class="mc-meta">Searching…</span>'
-        : !b.results.length ? '<span class="mc-meta">No results. Use Re-identify on this row.</span>'
+        : !b.results.length ? '<span class="mc-meta">No results. Try 🔍 Manual search.</span>'
         : '<select class="mc-text mc-batch-pick" data-i="' + i + '">' + b.results.slice(0, 8).map(function (x, j) {
             return '<option value="' + j + '"' + (j === b.pick ? ' selected' : '') + '>' + esc(x.Name) + ' (' + (x.ProductionYear || '?') + ') · ' + esc(x.SearchProviderName || '') + '</option>';
           }).join('') + '</select>' + (b.confident ? ' <span class="mc-tag ok">confident</span>' : '');
@@ -596,15 +643,10 @@
         '<input type="checkbox" class="mc-batch-check" data-i="' + i + '"' + (b.checked ? ' checked' : '') + (r ? '' : ' disabled') + '>' +
         '<img alt="" src="' + esc(poster(b.id, 140)) + '" onerror="this.style.visibility=\'hidden\'">' +
         '<div><b>' + esc(p ? p.jellyfinName : b.id) + '</b> <span class="mc-meta">(' + esc(p && p.year || '?') + ')</span>' +
-          (b.editing
-            ? '<form class="mc-batch-form" data-i="' + i + '">' +
-                '<input class="mc-text mc-bq" value="' + esc(b.query) + '" placeholder="Title, or tt1234567 / tmdb:123 / tvdb:123">' +
-                '<input class="mc-text mc-by" value="' + esc(b.year || '') + '" placeholder="Year" inputmode="numeric">' +
-                '<button is="emby-button" type="submit" class="raised button-submit mc-btn"><span>Search</span></button>' +
-                '<button is="emby-button" type="button" class="raised mc-btn mc-batch-cancel" data-i="' + i + '"><span>Cancel</span></button>' +
-              '</form>'
-            : '<div class="mc-meta">searched: ' + esc(b.query) + (b.year ? ' (' + b.year + ')' : '') +
-                ' · <a class="mc-batch-edit" data-i="' + i + '">✎ Search again</a></div>') +
+          '<div class="mc-meta">' + (b.manual ? '<span class="mc-tag info">manual pick</span> ' : 'searched: ') +
+            esc(b.query) + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-batch-manual" data-i="' + i + '" style="margin-top:.3em">' +
+            '<span>🔍 Manual search…</span></button>' +
           (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
         '<span class="mc-arrow">→</span>' +
         (r && r.ImageUrl ? '<img alt="" src="' + esc(r.ImageUrl) + '">' : '<img alt="" style="visibility:hidden">') +
@@ -624,17 +666,19 @@
   var batchRun = 0;
   function runBatchSearch() {
     var run = ++batchRun, providers = chosenSources();
-    batch.forEach(function (b) { b.results = null; b.pick = 0; b.checked = false; b.confident = false; b.status = ''; });
+    // rows you filled by manual search keep their pick
+    var todo = batch.filter(function (b) { return !b.manual; });
+    todo.forEach(function (b) { b.results = null; b.pick = 0; b.checked = false; b.confident = false; b.status = ''; });
     $('#mcBatchStatus').textContent = 'Searching ' + batch.length + ' item(s) on ' + providers.join(', ') + '…';
     renderBatch();
-    var queue = batch.slice(), totals = {}, done = 0;
+    var queue = todo.slice(), totals = {}, done = 0;
     // strictly sequential, top to bottom: one row's sources finish before the next row starts
     function next() {
       var b = queue.shift();
       if (!b || run !== batchRun) return Promise.resolve();
       var p = planById(b.id);
       done++;
-      $('#mcBatchStatus').textContent = 'Searching ' + done + ' of ' + batch.length + ': ' + (p ? p.jellyfinName : b.query) +
+      $('#mcBatchStatus').textContent = 'Searching ' + done + ' of ' + todo.length + ': ' + (p ? p.jellyfinName : b.query) +
         ' (' + providers.join(', ') + ')…';
       return searchSources(p, queryInfo(b.query, b.year), providers)
         .then(function (found) {
@@ -685,46 +729,15 @@
     return info;
   }
 
-  /** Re-search a single batch row with its own query (manual re-identify inside the batch). */
-  function searchBatchRow(b) {
-    var p = planById(b.id);
-    b.results = null; b.status = ''; b.checked = false; b.confident = false;
-    renderBatch();
-    return searchSources(p, queryInfo(b.query, b.year), chosenSources()).then(function (found) {
-      b.results = found.results;
-      var best = bestMatch(found.results, b.query, b.year);
-      b.pick = best == null ? 0 : best;
-      b.confident = best != null;
-      // the user asked for this search, so tick the row when there's anything to pick
-      b.checked = found.results.length > 0;
-      b.status = found.results.length ? '' : 'No results (' + countsText(found.counts) + ')';
-      renderBatch();
-    });
-  }
-
   $('#mcBatchAll').addEventListener('change', function (e) {
     batch.forEach(function (b) { if (b.results && b.results[b.pick]) b.checked = e.target.checked; });
     renderBatch();
   });
   $('#mcBatchList').addEventListener('click', function (e) {
-    var edit = e.target.closest('.mc-batch-edit'), cancel = e.target.closest('.mc-batch-cancel');
-    if (edit) {
-      batch[parseInt(edit.getAttribute('data-i'), 10)].editing = true;
-      renderBatch();
-      var f = $('#mcBatchList').querySelector('.mc-batch-form .mc-bq');
-      if (f) { f.focus(); f.select(); }
-    } else if (cancel) {
-      batch[parseInt(cancel.getAttribute('data-i'), 10)].editing = false;
-      renderBatch();
-    }
-  });
-  $('#mcBatchList').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var form = e.target.closest('.mc-batch-form'), b = batch[parseInt(form.getAttribute('data-i'), 10)];
-    b.query = form.querySelector('.mc-bq').value.trim() || b.query;
-    b.year = form.querySelector('.mc-by').value.trim();
-    b.editing = false;
-    searchBatchRow(b);
+    var btn = e.target.closest('.mc-batch-manual');
+    if (!btn) return;
+    var i = parseInt(btn.getAttribute('data-i'), 10);
+    openIdentify(batch[i].id, 'pick', i);
   });
 
   $('#mcBatchList').addEventListener('change', function (e) {
