@@ -52,8 +52,24 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public List<string> Verified { get; set; } = new();
 
+    /// <summary>Series folders combined by hand into one show (any IDs). Paths as Jellyfin sees them.</summary>
+    public List<SeriesGroup> SeriesGroups { get; set; } = new();
+
+    /// <summary>Series folders detached by hand: never grouped automatically with same-ID folders.</summary>
+    public List<string> DetachedSeries { get; set; } = new();
+
     /// <summary>Names typed by hand in the UI. Key is "tmdb:22", "tv-tvdb:81189", "imdb:tt..." or "path:/media/...".</summary>
     public List<NameOverride> Overrides { get; set; } = new();
+}
+
+public class SeriesGroup
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    public List<string> Paths { get; set; } = new();
+
+    /// <summary>The folder that is kept (others merge into it as seasons). Null = automatic choice.</summary>
+    public string? MainPath { get; set; }
 }
 
 public class RegexRule

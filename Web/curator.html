@@ -31,6 +31,13 @@
   #MovieCuratorPage .mc-folder { margin-top: .5em; padding: .6em .7em; border-radius: 6px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-folder .mc-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; margin-bottom: .4em; }
   #MovieCuratorPage .mc-folder .mc-name input { flex: 1; min-width: 12em; }
+  #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
+  #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
+  #MovieCuratorPage .mc-member { display: flex; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
+  #MovieCuratorPage .mc-member img { width: 34px; height: 51px; object-fit: cover; border-radius: 3px; background: var(--mc-soft); flex: none; }
+  #MovieCuratorPage .mc-member .mc-member-body { flex: 1; min-width: 0; font-size: .85em; }
+  #MovieCuratorPage .mc-member .mc-actions { flex: none; }
+  #MovieCuratorPage .mc-link { cursor: pointer; text-decoration: underline; font-size: .82em; opacity: .85; }
   #MovieCuratorPage .mc-ops { font-family: monospace; font-size: .78em; white-space: pre-wrap; word-break: break-all; margin-top: .4em; max-height: 22em; overflow: auto; }
 
   /* modals */
@@ -88,6 +95,7 @@
       <span class="mc-sep"></span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchIdentify" title="Suggest a match for each selected item; review and apply"><span>Identify selected</span></button>
       <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchFolders" title="Apply folder/file changes for the selected items"><span>Adjust folders</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn mc-series-only" id="mcCombine" title="Treat the selected series folders as one show (merged as seasons)"><span>🔗 Combine selected</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcVerifySel" title="Confirm the current match of the selected items"><span>✓ Mark correct</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcLockSel"><span>Lock</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnlockSel"><span>Unlock</span></button>
@@ -238,6 +246,15 @@
   }
   function api(method, path, body) { return http(method, 'MovieCurator/' + path, body); }
   function planById(id) { return plans.filter(function (p) { return p.itemId === id; })[0]; }
+  /** A row, or a folder inside a series group (members can be re-identified on their own). */
+  function itemById(id) {
+    var hit = planById(id);
+    if (hit) return hit;
+    plans.some(function (p) {
+      return (p.members || []).some(function (m) { if (m.itemId === id) { hit = m; return true; } return false; });
+    });
+    return hit;
+  }
   function short(p, root) { return root && p.indexOf(root + '/') === 0 ? p.slice(root.length + 1) : p; }
   function idText(ids) { return Object.keys(ids || {}).sort().map(function (k) { return k + ' ' + ids[k]; }).join(' · ') || 'no IDs'; }
   function poster(id, h) { return ApiClient.getUrl('Items/' + id + '/Images/Primary', { maxHeight: h || 240, quality: 85 }); }
@@ -314,6 +331,28 @@
     return h + '</div>';
   }
 
+  function groupBlock(p) {
+    if (!p.members || p.members.length < 2) return '';
+    var head = '<div class="mc-group-head">🔗 <b>' + p.members.length + ' folders shown as one show</b>' +
+      '<span class="mc-meta">' + (p.groupKind === 'manual' ? 'combined by you' : 'Jellyfin gave them the same IDs') +
+      ' · merged as seasons when you adjust folders with "Rename episodes" on</span>' +
+      (p.groupKind === 'manual' ? '<a class="mc-link mc-group-reset">Reset to automatic</a>' : '') + '</div>';
+    return '<div class="mc-group">' + head + p.members.map(function (m) {
+      return '<div class="mc-member" data-member="' + m.itemId + '">' +
+        '<img loading="lazy" alt="" src="' + esc(poster(m.itemId, 120)) + '" onerror="this.style.visibility=\'hidden\'">' +
+        '<div class="mc-member-body"><b>' + esc(short(m.path, p.root)) + '/</b>' +
+          (m.isMain ? ' <span class="mc-tag ok">main folder</span>' : '') +
+          (m.season != null ? ' <span class="mc-tag">→ season ' + m.season + '</span>' : '') +
+          '<div class="mc-meta">' + esc(m.jellyfinName) + ' (' + (m.year || '?') + ') · ' + esc(idText(m.providerIds)) + ' · ' +
+            m.episodeCount + ' episode file(s)</div></div>' +
+        '<div class="mc-actions">' +
+          (m.isMain ? '' : '<button is="emby-button" type="button" class="raised mc-btn mc-member-main" title="Keep this folder; the others merge into it"><span>Make main</span></button>') +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-member-identify"><span>Re-identify</span></button>' +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-member-detach" title="Not the same show: make it a separate series"><span>Detach</span></button>' +
+        '</div></div>';
+    }).join('') + '</div>';
+  }
+
   function row(p) {
     var tags = [];
     if (p.locked) tags.push('<span class="mc-tag ok">🔒 locked</span>');
@@ -323,6 +362,7 @@
     if (p.containerShows && p.containerShows.length) tags.push('<span class="mc-tag info">📦 ' + p.containerShows.length + ' shows inside</span>');
     if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
+    if (p.detached) tags.push('<span class="mc-tag">detached</span>');
     var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
     var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
     var nChanges = p.ops.length, nWarn = p.warnings.length;
@@ -339,9 +379,11 @@
           '<button is="emby-button" type="button" class="raised mc-btn mc-identify"><span>Re-identify</span></button>' +
           '<a is="emby-linkbutton" class="raised emby-button mc-btn" href="' + detailsUrl + '">Open</a>' +
           (p.verified ? '<a href="#" class="mc-unverify mc-meta" style="margin-left:.3em" title="Remove the ✓ verified mark">Unmark</a>' : '') +
+          (p.detached ? '<a class="mc-link mc-undo-detach" style="margin-left:.3em" title="Let it group with same-ID folders again">Undo detach</a>' : '') +
           '<span class="mc-folder-toggle">📁 ' + (nChanges ? nChanges + ' folder change' + (nChanges > 1 ? 's' : '') : 'folder tidy') +
             (nWarn ? ' · <span class="mc-warn">' + nWarn + ' note' + (nWarn > 1 ? 's' : '') + '</span>' : '') + (open[p.itemId] ? ' ▾' : ' ▸') + '</span>' +
         '</div>' +
+        groupBlock(p) +
         (open[p.itemId] ? folderPanel(p) : '') +
       '</div></div>';
   }
@@ -370,6 +412,7 @@
     $('#mcSummary').textContent = noun(plans.length) + ' · ' + c.sus + ' to check · ' + c.lock + ' locked · ' + c.ops + ' with folder changes · ' +
       (n ? n + ' selected' : 'none selected');
     ['#mcBatchIdentify', '#mcBatchFolders', '#mcVerifySel', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
+    $('#mcCombine').disabled = n < 2;
   }
 
   function render() {
@@ -554,7 +597,7 @@
    * mode 'pick' : manual search for batch row `index` (Use this puts the result into the batch table).
    */
   function openIdentify(id, mode, index) {
-    var p = planById(id), b = mode === 'pick' ? batch[index] : null;
+    var p = itemById(id), b = mode === 'pick' ? batch[index] : null;
     identifyId = id;
     identifyMode = mode || 'apply';
     pickIndex = b ? index : null;
@@ -575,7 +618,7 @@
 
   var lastResults = [];
   function runIdentifySearch() {
-    var p = planById(identifyId);
+    var p = itemById(identifyId);
     var info = { Name: $('#mcIdName').value.trim(), ProviderIds: {} };
     var y = $('#mcIdYear').value.trim();
     if (/^\d{4}$/.test(y)) info.Year = parseInt(y, 10);
@@ -608,7 +651,7 @@
   $('#mcIdResults').addEventListener('click', function (e) {
     var b = e.target.closest('.mc-apply-result');
     if (!b) return;
-    var p = planById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
+    var p = itemById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
     if (identifyMode === 'pick') {
       // put the chosen result into the batch row; nothing is applied until "Apply checked"
       var row = batch[pickIndex];
@@ -911,6 +954,22 @@
     }).catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
   }
   $('#mcLockSel').addEventListener('click', function () { bulkLock(true); });
+  $('#mcCombine').addEventListener('click', function () {
+    var rows = selectedIds().map(planById);
+    if (rows.length < 2) return;
+    // a selected group brings all its folders along
+    var ids = [];
+    rows.forEach(function (p) {
+      (p.members && p.members.length ? p.members.map(function (m) { return m.itemId; }) : [p.itemId]).forEach(function (x) {
+        if (ids.indexOf(x) < 0) ids.push(x);
+      });
+    });
+    if (!confirm('Treat these as ONE show?\n\n' + rows.map(function (p) { return '• ' + p.jellyfinName + '  (' + short(p.path, p.root) + '/)'; }).join('\n') +
+        '\n\nThe first one (' + rows[0].jellyfinName + ') is kept as the main folder; with "Rename episodes" on, the others merge into it as seasons.')) return;
+    api('POST', 'Group/Combine', { itemIds: ids, mainItemId: rows[0].itemId })
+      .then(function () { selected = {}; return load(); })
+      .catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
+  });
   $('#mcUnlockSel').addEventListener('click', function () { bulkLock(false); });
 
   $('#mcBatchFolders').addEventListener('click', function () {
@@ -967,6 +1026,14 @@
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;
     var id = rowEl.getAttribute('data-id'), p = planById(id);
+    var memberEl = e.target.closest('.mc-member'), memberId = memberEl && memberEl.getAttribute('data-member');
+    var groupIds = (p.members || []).map(function (m) { return m.itemId; });
+    function regroup(path, body) { api('POST', path, body).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); }); }
+    if (memberId && e.target.closest('.mc-member-identify')) { openIdentify(memberId); return; }
+    if (memberId && e.target.closest('.mc-member-detach')) { regroup('Group/Detach', { itemIds: [memberId] }); return; }
+    if (memberId && e.target.closest('.mc-member-main')) { regroup('Group/Combine', { itemIds: groupIds, mainItemId: memberId }); return; }
+    if (e.target.closest('.mc-group-reset')) { regroup('Group/Reset', { itemIds: groupIds }); return; }
+    if (e.target.closest('.mc-undo-detach')) { regroup('Group/Reset', { itemIds: [id] }); return; }
     if (e.target.closest('.mc-identify')) openIdentify(id);
     else if (e.target.closest('.mc-verify')) {
       verify([id], true).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });

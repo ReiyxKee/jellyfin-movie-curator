@@ -34,6 +34,14 @@ public class NfoRequest
     [JsonPropertyName("lockNfo")] public bool LockNfo { get; set; } = true;
 }
 
+public class GroupRequest
+{
+    [JsonPropertyName("itemIds")] public List<string> ItemIds { get; set; } = new();
+
+    /// <summary>Combine: the folder to keep (optional).</summary>
+    [JsonPropertyName("mainItemId")] public string? MainItemId { get; set; }
+}
+
 public class NameRequest
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
@@ -101,6 +109,32 @@ public class CuratorController : ControllerBase
     [HttpPost("WriteNfo")]
     public ActionResult<string> WriteNfo([FromBody] NfoRequest request)
         => Guid.TryParse(request.ItemId, out var id) && _library.GetItemById(id) is { } item ? _service.WriteNfo(item, request.LockNfo) : NotFound();
+
+    /// <summary>Combine series folders into one show (as seasons), whatever their IDs.</summary>
+    [HttpPost("Group/Combine")]
+    public ActionResult<int> CombineSeries([FromBody] GroupRequest request) => _service.CombineSeries(request.ItemIds, request.MainItemId);
+
+    /// <summary>Detach one series folder from its group.</summary>
+    [HttpPost("Group/Detach")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult DetachSeries([FromBody] GroupRequest request)
+    {
+        foreach (var id in request.ItemIds)
+        {
+            _service.DetachSeries(id);
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>Back to automatic grouping for these series folders.</summary>
+    [HttpPost("Group/Reset")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult ResetSeriesGrouping([FromBody] GroupRequest request)
+    {
+        _service.ResetSeriesGrouping(request.ItemIds);
+        return NoContent();
+    }
 
     /// <summary>Mark the current identification of items as correct ("Looks right"), or unmark it.</summary>
     [HttpPost("Verify")]

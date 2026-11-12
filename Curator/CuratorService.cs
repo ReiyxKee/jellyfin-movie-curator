@@ -118,6 +118,14 @@ public class ItemPlan
 
     [JsonPropertyName("seasonSource")] public string? SeasonSource { get; set; }
 
+    /// <summary>Series: every folder in this group ("auto" = same IDs, "manual" = combined by you); empty when alone.</summary>
+    [JsonPropertyName("members")] public List<GroupMember> Members { get; set; } = new();
+
+    [JsonPropertyName("groupKind")] public string? GroupKind { get; set; }
+
+    /// <summary>Series: you detached this folder from its automatic group.</summary>
+    [JsonPropertyName("detached")] public bool Detached { get; set; }
+
     /// <summary>Series: this folder only holds other shows (e.g. "Fate Series/Fate Zero/…"); their folder names.</summary>
     [JsonPropertyName("containerShows")] public List<string> ContainerShows { get; set; } = new();
 
@@ -130,6 +138,37 @@ public class ItemPlan
     [JsonPropertyName("ops")] public List<PlanOp> Ops { get; set; } = new();
 
     [JsonPropertyName("warnings")] public List<string> Warnings { get; set; } = new();
+}
+
+/// <summary>One folder inside a group of series folders shown as one show.</summary>
+public class GroupMember
+{
+    [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("jellyfinName")] public string JellyfinName { get; set; } = string.Empty;
+
+    [JsonPropertyName("originalTitle")] public string? OriginalTitle { get; set; }
+
+    [JsonPropertyName("year")] public int? Year { get; set; }
+
+    [JsonPropertyName("providerIds")] public Dictionary<string, string> ProviderIds { get; set; } = new();
+
+    [JsonPropertyName("episodeCount")] public int EpisodeCount { get; set; }
+
+    /// <summary>Season this folder's episodes become (from its name, a value you set, or Jellyfin).</summary>
+    [JsonPropertyName("season")] public int? Season { get; set; }
+
+    [JsonPropertyName("isMain")] public bool IsMain { get; set; }
+
+    [JsonPropertyName("locked")] public bool Locked { get; set; }
+
+    [JsonPropertyName("guessName")] public string GuessName { get; set; } = string.Empty;
+
+    [JsonPropertyName("guessYear")] public int? GuessYear { get; set; }
+
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "series";
 }
 
 public class ApplyResult
@@ -924,8 +963,23 @@ public class CuratorService
     private sealed record SeasonSource(Series Series, string Dir, List<(Episode Episode, int Season)> Episodes);
 
     /// <summary>Folders in the same parent that Jellyfin identified as the same show (same TVDB/TMDB/IMDb ID).</summary>
+    private static string SeriesPath(BaseItem s) => s.Path.TrimEnd('/');
+
+    private static SeriesGroup? ManualGroup(BaseItem s) =>
+        Config.SeriesGroups.FirstOrDefault(g => g.Paths.Contains(SeriesPath(s)));
+
     private static string IdentityKey(Series s)
     {
+        if (ManualGroup(s) is { } manual)
+        {
+            return "manual:" + manual.Id;
+        }
+
+        if (Config.DetachedSeries.Contains(SeriesPath(s)))
+        {
+            return "id:" + s.Id.ToString("N");
+        }
+
         var parent = System.IO.Path.GetDirectoryName(s.Path.TrimEnd('/')) ?? string.Empty;
         foreach (var provider in new[] { "Tvdb", "Tmdb", "Imdb" })
         {
@@ -987,8 +1041,10 @@ public class CuratorService
     {
         // The folder that stays: one already named as the template wants, else the one without a season in its name,
         // else the lowest season / shortest name. Other folders of the same show are merged into it.
+        var mainPath = members.Count > 1 ? ManualGroup(members[0])?.MainPath : null;
         var s = members
-            .OrderByDescending(m => System.IO.Path.GetFileName(m.Path.TrimEnd('/')) == SeriesNames(m).Folder)
+            .OrderByDescending(m => mainPath != null && SeriesPath(m) == mainPath)
+            .ThenByDescending(m => System.IO.Path.GetFileName(m.Path.TrimEnd('/')) == SeriesNames(m).Folder)
             .ThenBy(m => SeasonFromName(System.IO.Path.GetFileName(m.Path.TrimEnd('/'))) ?? 0)
             .ThenBy(m => m.Path.Length)
             .First();
@@ -1019,6 +1075,38 @@ public class CuratorService
             MergedFolders = others.Select(o => o.Path.TrimEnd('/')).ToList(),
         };
         (p.GuessName, p.GuessYear) = GuessFromName(System.IO.Path.GetFileName(dir));
+        p.Detached = Config.DetachedSeries.Contains(dir);
+        if (members.Count > 1)
+        {
+            p.GroupKind = ManualGroup(s) != null ? "manual" : "auto";
+            p.Members = members
+                .OrderByDescending(m => m == s)
+                .ThenBy(m => SeasonFromName(System.IO.Path.GetFileName(SeriesPath(m))) ?? 0)
+                .ThenBy(m => SeriesPath(m), StringComparer.Ordinal)
+                .Select(m =>
+                {
+                    var eps = episodesBySeries.GetValueOrDefault(m.Id) ?? new List<Episode>();
+                    var hint = SeasonFromName(System.IO.Path.GetFileName(SeriesPath(m)));
+                    var guess = GuessFromName(System.IO.Path.GetFileName(SeriesPath(m)));
+                    return new GroupMember
+                    {
+                        ItemId = m.Id.ToString("N"),
+                        Path = SeriesPath(m),
+                        JellyfinName = m.Name ?? string.Empty,
+                        OriginalTitle = m.OriginalTitle,
+                        Year = m.ProductionYear,
+                        ProviderIds = Ids(m),
+                        EpisodeCount = eps.Count,
+                        Season = eps.Count > 0 ? SeasonFor(eps[0], CustomSeason(m), hint).Season : hint,
+                        IsMain = m == s,
+                        Locked = m.IsLocked,
+                        GuessName = guess.Name,
+                        GuessYear = guess.Year,
+                    };
+                })
+                .ToList();
+        }
+
         var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
 
@@ -1277,6 +1365,72 @@ public class CuratorService
         }
 
         return new XDocument(new XDeclaration("1.0", "utf-8", "yes"), x).Declaration + "\n" + x + "\n";
+    }
+
+    // ------------------------------------------------------------------ manual series grouping
+    private List<Series> SeriesByIds(IEnumerable<string> itemIds) => itemIds
+        .Select(id => Guid.TryParse(id, out var g) ? _library.GetItemById(g) as Series : null)
+        .OfType<Series>()
+        .ToList();
+
+    private static void DropFromGroups(ICollection<string> paths)
+    {
+        foreach (var g in Config.SeriesGroups)
+        {
+            g.Paths.RemoveAll(paths.Contains);
+            if (g.MainPath != null && paths.Contains(g.MainPath))
+            {
+                g.MainPath = null;
+            }
+        }
+
+        Config.SeriesGroups.RemoveAll(g => g.Paths.Count < 2);
+    }
+
+    /// <summary>Combine these series folders into one show (any IDs). mainItemId picks the folder that is kept.</summary>
+    public int CombineSeries(IEnumerable<string> itemIds, string? mainItemId)
+    {
+        var items = SeriesByIds(itemIds);
+        var paths = items.Select(SeriesPath).Distinct().ToList();
+        if (paths.Count < 2)
+        {
+            return 0;
+        }
+
+        DropFromGroups(paths);
+        Config.DetachedSeries.RemoveAll(paths.Contains);
+        var main = items.FirstOrDefault(i => i.Id.ToString("N") == mainItemId?.Replace("-", string.Empty, StringComparison.Ordinal));
+        Config.SeriesGroups.Add(new SeriesGroup { Paths = paths, MainPath = main == null ? null : SeriesPath(main) });
+        Plugin.Instance!.SaveConfiguration();
+        return paths.Count;
+    }
+
+    /// <summary>Take one folder out of its group (manual or automatic); it becomes its own show.</summary>
+    public void DetachSeries(string itemId)
+    {
+        var s = SeriesByIds(new[] { itemId }).FirstOrDefault();
+        if (s == null)
+        {
+            return;
+        }
+
+        var path = SeriesPath(s);
+        DropFromGroups(new List<string> { path });
+        if (!Config.DetachedSeries.Contains(path))
+        {
+            Config.DetachedSeries.Add(path);
+        }
+
+        Plugin.Instance!.SaveConfiguration();
+    }
+
+    /// <summary>Forget manual grouping/detaching for these folders (back to automatic same-ID grouping).</summary>
+    public void ResetSeriesGrouping(IEnumerable<string> itemIds)
+    {
+        var paths = SeriesByIds(itemIds).Select(SeriesPath).ToList();
+        DropFromGroups(paths);
+        Config.DetachedSeries.RemoveAll(paths.Contains);
+        Plugin.Instance!.SaveConfiguration();
     }
 
     // ------------------------------------------------------------------ NFO maintenance for re-identify
