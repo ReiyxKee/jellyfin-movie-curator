@@ -493,13 +493,17 @@
     return bestScore >= 2.5 ? best : null;
   }
 
-  /** Apply a search result like Jellyfin's Identify. Locked items ignore metadata updates, so unlock first. */
+  /**
+   * Apply a search result like Jellyfin's Identify. Locked items ignore metadata updates, so unlock first.
+   * A match the user picked is a confirmed one: afterwards it's marked "✓ verified" (against the new IDs).
+   */
   function applyMatch(p, result, replaceImages) {
     var relock = $('#mcLockAfter').checked || p.locked;
     var pre = p.locked ? api('POST', 'Lock', { itemIds: [p.itemId], locked: false }) : Promise.resolve();
     return pre
       .then(function () { return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result); })
-      .then(function () { return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; });
+      .then(function () { return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; })
+      .then(function () { return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); });
   }
 
   function openIdentify(id) {
