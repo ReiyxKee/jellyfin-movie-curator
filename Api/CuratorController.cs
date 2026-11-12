@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Jellyfin.Plugin.MovieCurator.Curator;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.IO;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -66,13 +68,39 @@ public class SeasonRequest
 public class CuratorController : ControllerBase
 {
     private readonly ILibraryManager _library;
+    private readonly IProviderManager _providers;
+    private readonly IFileSystem _fileSystem;
+    private readonly ILogger<CuratorController> _logger;
     private readonly CuratorService _service;
 
-    public CuratorController(ILibraryManager library, ILogger<CuratorController> logger)
+    public CuratorController(ILibraryManager library, IProviderManager providers, IFileSystem fileSystem, ILogger<CuratorController> logger)
     {
         _library = library;
+        _providers = providers;
+        _fileSystem = fileSystem;
+        _logger = logger;
         _service = new CuratorService(library, logger);
     }
+
+    /// <summary>
+    /// Apply picked matches in the background (unlock, remove old NFO, apply, new NFO, lock, verify per item).
+    /// Returns at once; poll GET IdentifyJobs/{id}. Avoids reverse-proxy timeouts on slow metadata downloads.
+    /// </summary>
+    [HttpPost("IdentifyJobs")]
+    public ActionResult<IdentifyJob> StartIdentifyJob([FromBody] IdentifyJobRequest request)
+    {
+        if (request.Items.Count == 0)
+        {
+            return BadRequest("No items.");
+        }
+
+        return IdentifyQueue.Start(request, _service, _library, _providers, _fileSystem, _logger);
+    }
+
+    /// <summary>Progress of an identify job.</summary>
+    [HttpGet("IdentifyJobs/{id}")]
+    public ActionResult<IdentifyJob> GetIdentifyJob([FromRoute] string id) =>
+        IdentifyQueue.Get(id) is { } job ? job : NotFound();
 
     /// <summary>Preview: what would change for every movie (type=movies) or series (type=series). Nothing is touched.</summary>
     [HttpGet("Plan")]

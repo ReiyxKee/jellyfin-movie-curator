@@ -603,27 +603,45 @@
    * Apply a search result like Jellyfin's Identify. Locked items ignore metadata updates, so unlock first.
    * A match the user picked is a confirmed one: afterwards it's marked "✓ verified" (against the new IDs).
    */
-  function applyMatch(p, result, replaceImages, onStep) {
-    var relock = $('#mcLockAfter').checked || p.locked;
-    var hadNfo = 0;
-    function step(i, label) { if (onStep) onStep(label, i, 6); }
-    step(0, 'unlocking');
-    var pre = p.locked ? api('POST', 'Lock', { itemIds: [p.itemId], locked: false }) : Promise.resolve();
-    return pre
-      // an NFO with the old IDs would pull the item back to the old match, so take it away first
-      .then(function () { step(1, 'removing old NFO'); return api('POST', 'RemoveNfo', { itemId: p.itemId }).then(function (n) { hadNfo = n || 0; }); })
-      .then(function () {
-        step(2, 'applying match in Jellyfin (fetching metadata)');
-        return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result);
-      })
-      // then write a fresh NFO with the new IDs (always if there was one, else when "Write NFO" is on)
-      .then(function () {
-        step(3, 'writing new NFO');
-        return hadNfo || $('#mcNfo').checked ? api('POST', 'WriteNfo', { itemId: p.itemId, lockNfo: $('#mcLockNfo').checked }) : null;
-      })
-      .then(function () { step(4, 'locking'); return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; })
-      .then(function () { step(5, 'marking verified'); return api('POST', 'Verify', { itemIds: [p.itemId], verified: true }); })
-      .then(function () { step(6, 'done'); });
+  /**
+   * Apply picked matches as a server-side job: entries = [{ p, result, replaceImages }]. The cached search results are
+   * sent once (no re-search); the server does unlock → remove NFO → apply → new NFO → lock → verify per item, so slow
+   * metadata downloads can't hit a proxy timeout. onUpdate(job) is called on every poll; resolves with the final job.
+   */
+  function runIdentifyJob(entries, onUpdate) {
+    var body = {
+      items: entries.map(function (e) {
+        return { itemId: e.p.itemId, name: e.p.jellyfinName, result: e.result, replaceImages: e.replaceImages !== false };
+      }),
+      lockAfter: $('#mcLockAfter').checked, writeNfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
+    };
+    return api('POST', 'IdentifyJobs', body).then(function (job) {
+      return new Promise(function (resolve, reject) {
+        var misses = 0;
+        (function poll() {
+          api('GET', 'IdentifyJobs/' + job.id).then(function (j) {
+            misses = 0;
+            if (onUpdate) onUpdate(j);
+            if (j.finished) resolve(j); else setTimeout(poll, 1000);
+          }).catch(function (e) {
+            // a dropped poll is fine (the job keeps running on the server); give up after ~30 s of failures
+            if (++misses > 30) reject(e); else setTimeout(poll, 1000);
+          });
+        })();
+      });
+    });
+  }
+  function jobProgress(sel, j) {
+    var cur = j.items.filter(function (x) { return x.status === 'running'; })[0];
+    var frac = cur ? (cur.stepIndex || 0) / (j.steps || 6) : 0;
+    progress(sel, {
+      done: j.done, total: j.total,
+      text: cur ? (cur.name || '') + ' → ' + (cur.match || '') + ' · ' + (cur.step || '') + ' (' + (cur.stepIndex || 0) + '/' + (j.steps || 6) + ')'
+        : (j.finished ? 'done' : 'queued (waiting for another job to finish)…')
+    });
+    // let the bar move within the current item too
+    var fill = $(sel + ' .mc-progress-fill');
+    if (fill && j.total) fill.style.width = Math.round(100 * (j.done + frac) / j.total) + '%';
   }
 
   /**
@@ -709,10 +727,12 @@
     }
     $('#mcIdStatus').textContent = 'Applying "' + r.Name + '"…';
     $$('.mc-apply-result').forEach(function (x) { x.disabled = true; });
-    applyMatch(p, r, $('#mcIdImages').checked, function (label, i, n) {
-      progress('#mcIdProgress', { done: i, total: n, text: r.Name + ' · ' + label });
-    }).then(function () {
+    runIdentifyJob([{ p: p, result: r, replaceImages: $('#mcIdImages').checked }], function (j) {
+      var it = j.items[0];
+      progress('#mcIdProgress', { done: it.stepIndex || 0, total: j.steps || 6, text: r.Name + ' · ' + (it.step || 'queued…') });
+    }).then(function (j) {
       progress('#mcIdProgress', null);
+      if (j.items[0].status === 'failed') throw new Error(j.items[0].error || 'failed');
       hideModal('#mcIdentify');
       return load();
     }).catch(function (err) {
@@ -849,25 +869,30 @@
     var todo = batch.filter(function (b) { return b.checked && b.results && b.results[b.pick]; });
     if (!todo.length) return;
     $('#mcBatchApply').disabled = true;
-    var n = 0, chain = Promise.resolve();
-    todo.forEach(function (b) {
-      chain = chain.then(function () {
-        var at = ++n, name = (planById(b.id) || {}).jellyfinName || b.query;
-        $('#mcBatchStatus').textContent = 'Applying ' + at + ' of ' + todo.length + '…';
-        return applyMatch(planById(b.id), b.results[b.pick], true, function (label, i, steps) {
-          // whole-batch bar: finished items plus this item's step fraction
-          progress('#mcBatchProgress', { done: at - 1, total: todo.length, text: name + ' → ' + b.results[b.pick].Name + ' · ' + label + ' (' + i + '/' + steps + ')' });
-        })
-          .then(function () { b.status = '✔ applied'; b.checked = false; })
-          .catch(function (e) { b.status = 'Failed: ' + e.message; })
-          .then(renderBatch);
+    $('#mcBatchStatus').textContent = 'Applying ' + todo.length + ' match(es) on the server (you can close this window; it keeps going)…';
+    todo.forEach(function (b) { b.status = 'queued…'; });
+    renderBatch();
+    var entries = todo.map(function (b) { return { p: itemById(b.id), result: b.results[b.pick], replaceImages: true }; });
+    function sync(j) {
+      jobProgress('#mcBatchProgress', j);
+      j.items.forEach(function (x) {
+        var b = todo.filter(function (t) { return t.id === x.itemId; })[0];
+        if (!b) return;
+        if (x.status === 'done') { b.status = '✔ applied'; b.checked = false; }
+        else if (x.status === 'failed') b.status = 'Failed: ' + (x.error || 'unknown error');
+        else if (x.status === 'running') b.status = '… ' + (x.step || 'working');
       });
-    });
-    chain.then(function () {
-      progress('#mcBatchProgress', { done: todo.length, total: todo.length, text: 'done' });
+      renderBatch();
+    }
+    runIdentifyJob(entries, sync).then(function (j) {
+      sync(j);
       setTimeout(function () { progress('#mcBatchProgress', null); }, 1500);
-      $('#mcBatchStatus').textContent = 'Done. Close this window to see the updated list.';
+      $('#mcBatchStatus').textContent = 'Done: ' + (j.done - j.failed) + ' applied' + (j.failed ? ', ' + j.failed + ' failed (see rows)' : '') +
+        '. Close this window to see the updated list.';
       return load();
+    }).catch(function (e) {
+      progress('#mcBatchProgress', null);
+      $('#mcBatchStatus').textContent = 'Lost contact with the server: ' + e.message + '. The job may still be running; refresh later.';
     });
   });
 
