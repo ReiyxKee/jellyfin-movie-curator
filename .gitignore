@@ -1,0 +1,14 @@
+# build output (./build.sh / dotnet publish)
+bin/
+obj/
+dist/
+
+# editors / OS
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+
+# local tool data (Claude Code worktrees)
+.claude/

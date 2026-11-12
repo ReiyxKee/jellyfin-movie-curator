@@ -1,109 +1,192 @@
 <div id="MovieCuratorPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
 <style>
-  #MovieCuratorPage .mo-bar { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; margin: .8em 0; }
-  #MovieCuratorPage .mo-bar label { display: inline-flex; gap: .35em; align-items: center; cursor: pointer; }
-  #MovieCuratorPage input.mo-text { padding: .45em .6em; min-width: 14em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 4px; }
-  #MovieCuratorPage .mo-summary { opacity: .8; margin: .3em 0 1em; }
-  #MovieCuratorPage .mo-card { border: 1px solid rgba(128,128,128,.28); border-radius: 6px; padding: .7em .9em; margin: .55em 0; }
-  #MovieCuratorPage .mo-card.mo-sus { border-left: 4px solid #e0a030; }
-  #MovieCuratorPage .mo-head { display: flex; gap: .7em; align-items: flex-start; }
-  #MovieCuratorPage .mo-head > input[type=checkbox] { margin-top: .5em; transform: scale(1.2); }
-  #MovieCuratorPage .mo-main { flex: 1; min-width: 0; }
-  #MovieCuratorPage .mo-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; }
-  #MovieCuratorPage .mo-name input { flex: 1; min-width: 12em; font-size: 1.05em; font-weight: 600; padding: .3em .5em; background: transparent; color: inherit; border: 1px solid transparent; border-radius: 4px; }
-  #MovieCuratorPage .mo-name input:hover, #MovieCuratorPage .mo-name input:focus { border-color: rgba(128,128,128,.5); }
-  #MovieCuratorPage .mo-meta { font-size: .85em; opacity: .75; margin: .2em 0 .3em .55em; word-break: break-word; }
-  #MovieCuratorPage .mo-tag { display: inline-block; font-size: .75em; padding: .1em .5em; border-radius: 999px; background: rgba(128,128,128,.22); }
-  #MovieCuratorPage .mo-tag.warn { background: rgba(224,160,48,.3); }
-  #MovieCuratorPage .mo-tag.custom { background: rgba(0,164,220,.3); }
-  #MovieCuratorPage .mo-tag.lock { background: rgba(82,181,75,.3); }
-  #MovieCuratorPage .mo-ops { font-family: monospace; font-size: .8em; margin: .4em 0 0 .55em; white-space: pre-wrap; word-break: break-all; opacity: .9; }
-  #MovieCuratorPage .mo-warn { color: #e0a030; font-size: .85em; margin-left: .55em; }
-  #MovieCuratorPage .mo-small { font-size: .85em; padding: .25em .7em; min-width: 0; margin: 0; }
-  #MovieCuratorPage details summary { cursor: pointer; font-size: .85em; opacity: .8; margin-left: .55em; }
-  #MovieCuratorPage .mo-search { margin: .6em 0 .2em .55em; padding: .6em; border-radius: 6px; background: rgba(128,128,128,.08); }
-  #MovieCuratorPage .mo-search form { display: flex; gap: .4em; flex-wrap: wrap; }
-  #MovieCuratorPage .mo-search form input.mo-q { flex: 1; }
-  #MovieCuratorPage .mo-search form input.mo-y { width: 5.5em; min-width: 0; }
-  #MovieCuratorPage .mo-res { display: flex; gap: .6em; align-items: flex-start; padding: .45em 0; border-top: 1px solid rgba(128,128,128,.18); }
-  #MovieCuratorPage .mo-res img { width: 46px; height: 69px; object-fit: cover; border-radius: 3px; background: rgba(128,128,128,.2); flex: none; }
-  #MovieCuratorPage .mo-res .mo-res-main { flex: 1; min-width: 0; font-size: .9em; }
-  #MovieCuratorPage .mo-res .mo-res-ov { opacity: .7; font-size: .85em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  #MovieCuratorPage .mo-res.mo-best { background: rgba(82,181,75,.12); border-radius: 4px; }
+  #MovieCuratorPage { --mc-bg: #101010; --mc-line: rgba(128,128,128,.28); --mc-soft: rgba(128,128,128,.12); --mc-warn: #e0a030; --mc-ok: rgba(82,181,75,.3); --mc-info: rgba(0,164,220,.3); }
+  #MovieCuratorPage .mc-panel { position: sticky; top: 0; z-index: 20; background: var(--mc-bg); padding: .6em 0 .5em; border-bottom: 1px solid var(--mc-line); }
+  #MovieCuratorPage .mc-bar { display: flex; flex-wrap: wrap; gap: .45em .9em; align-items: center; margin: .3em 0; }
+  #MovieCuratorPage .mc-bar label { display: inline-flex; gap: .3em; align-items: center; cursor: pointer; font-size: .9em; }
+  #MovieCuratorPage .mc-sep { width: 1px; align-self: stretch; background: var(--mc-line); }
+  #MovieCuratorPage .mc-btn { font-size: .85em; padding: .3em .8em; min-width: 0; margin: 0; }
+  #MovieCuratorPage .mc-text { padding: .4em .6em; background: var(--mc-soft); color: inherit; border: 1px solid var(--mc-line); border-radius: 4px; font: inherit; }
+  #MovieCuratorPage .mc-summary { font-size: .85em; opacity: .8; }
+  #MovieCuratorPage .mc-tag { display: inline-block; font-size: .72em; font-weight: normal; padding: .1em .55em; border-radius: 999px; background: var(--mc-soft); vertical-align: middle; margin-left: .3em; }
+  #MovieCuratorPage .mc-tag.warn { background: rgba(224,160,48,.3); }
+  #MovieCuratorPage .mc-tag.ok { background: var(--mc-ok); }
+  #MovieCuratorPage .mc-tag.info { background: var(--mc-info); }
+  #MovieCuratorPage .mc-warn { color: var(--mc-warn); font-size: .85em; }
+  #MovieCuratorPage .mc-meta { font-size: .82em; opacity: .7; word-break: break-word; }
+
+  /* rows */
+  #MovieCuratorPage .mc-row { display: flex; gap: .9em; align-items: flex-start; padding: .8em .4em; border-bottom: 1px solid var(--mc-line); }
+  #MovieCuratorPage .mc-row.mc-sus { box-shadow: inset 3px 0 0 var(--mc-warn); }
+  #MovieCuratorPage .mc-row.mc-selected { background: var(--mc-soft); }
+  #MovieCuratorPage .mc-row > input[type=checkbox] { margin-top: 2.2em; transform: scale(1.25); flex: none; }
+  #MovieCuratorPage .mc-poster { width: 74px; height: 111px; object-fit: cover; border-radius: 4px; background: var(--mc-soft); flex: none; }
+  #MovieCuratorPage .mc-poster.mc-noimg { visibility: hidden; }
+  #MovieCuratorPage .mc-body { flex: 1; min-width: 0; }
+  #MovieCuratorPage .mc-title { font-size: 1.05em; font-weight: 600; }
+  #MovieCuratorPage .mc-year { opacity: .7; font-weight: normal; }
+  #MovieCuratorPage .mc-desc { font-size: .85em; opacity: .85; margin: .3em 0 .45em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  #MovieCuratorPage .mc-actions { display: flex; flex-wrap: wrap; gap: .4em; align-items: center; }
+  #MovieCuratorPage .mc-folder-toggle { cursor: pointer; font-size: .85em; opacity: .85; margin-left: .3em; user-select: none; }
+  #MovieCuratorPage .mc-folder { margin-top: .5em; padding: .6em .7em; border-radius: 6px; background: var(--mc-soft); }
+  #MovieCuratorPage .mc-folder .mc-name { display: flex; gap: .4em; flex-wrap: wrap; align-items: center; margin-bottom: .4em; }
+  #MovieCuratorPage .mc-folder .mc-name input { flex: 1; min-width: 12em; }
+  #MovieCuratorPage .mc-ops { font-family: monospace; font-size: .78em; white-space: pre-wrap; word-break: break-all; margin-top: .4em; max-height: 22em; overflow: auto; }
+
+  /* modals */
+  #MovieCuratorPage .mc-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 1em; overflow: auto; }
+  #MovieCuratorPage .mc-modal[hidden] { display: none; }
+  #MovieCuratorPage .mc-dialog { background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 8px; width: min(900px, 100%); padding: 1em 1.2em; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #MovieCuratorPage .mc-dialog h3 { margin: 0 0 .6em; display: flex; justify-content: space-between; align-items: center; gap: 1em; }
+  #MovieCuratorPage .mc-form { display: grid; grid-template-columns: 1fr 6em; gap: .5em; }
+  #MovieCuratorPage .mc-form .mc-wide { grid-column: 1 / -1; }
+  #MovieCuratorPage .mc-form .mc-ids { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: .5em; }
+  #MovieCuratorPage .mc-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .8em; margin-top: .9em; }
+  #MovieCuratorPage .mc-result { border: 1px solid var(--mc-line); border-radius: 6px; padding: .5em; display: flex; flex-direction: column; gap: .3em; font-size: .85em; }
+  #MovieCuratorPage .mc-result.mc-best { border-color: rgba(82,181,75,.8); box-shadow: 0 0 0 1px rgba(82,181,75,.6); }
+  #MovieCuratorPage .mc-result img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; background: var(--mc-soft); }
+  #MovieCuratorPage .mc-result .mc-ov { opacity: .7; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  #MovieCuratorPage .mc-batch-row { display: grid; grid-template-columns: auto 46px 1fr auto 46px 1.4fr; gap: .6em; align-items: center; padding: .5em 0; border-bottom: 1px solid var(--mc-line); font-size: .88em; }
+  #MovieCuratorPage .mc-batch-row img { width: 46px; height: 69px; object-fit: cover; border-radius: 3px; background: var(--mc-soft); }
+  #MovieCuratorPage .mc-batch-row select { width: 100%; }
+  @media (max-width: 700px) {
+    #MovieCuratorPage .mc-batch-row { grid-template-columns: auto 1fr; }
+    #MovieCuratorPage .mc-batch-row img, #MovieCuratorPage .mc-batch-row .mc-arrow { display: none; }
+  }
 </style>
 <div data-role="content">
 <div class="content-primary">
   <h2 class="sectionTitle">Movie Curator</h2>
-  <p>Groups every movie into its own <code>&lt;Original title&gt; (&lt;Year&gt;)</code> folder, fixes wrong matches (search &amp; pick, or
-     <b>Suggest matches</b> from the file names), and <b>locks</b> movies so batch metadata refreshes leave them alone.
-     A locked <code>.nfo</code> keeps the identification with the files. Files only move when you press <b>Apply</b>.</p>
 
-  <details class="mo-naming" id="moNaming">
-    <summary style="font-size:1em;opacity:1;margin:0"><b>Naming</b> <span class="mo-meta" id="moNamingSummary"></span></summary>
-    <div class="mo-search" style="margin-left:0">
-      <p class="mo-meta" style="margin-left:0">Tokens: <code>{title}</code> (Jellyfin's title), <code>{originalTitle}</code> (falls back to title),
-        <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>. Empty brackets and dangling dashes are removed when a value is missing.</p>
-      <div class="mo-bar" style="margin:.3em 0">
-        <label style="flex:1;min-width:16em">Folder <input class="mo-text" id="moTplFolder" style="flex:1" placeholder="{originalTitle} ({year})"></label>
-        <span class="mo-meta">e.g. <code>{title} - {year}</code>, <code>{year} - {title}</code>, <code>{title} ({year}) [imdbid-{imdb}]</code></span>
-      </div>
-      <div class="mo-bar" style="margin:.3em 0">
-        <label style="flex:1;min-width:16em">File <input class="mo-text" id="moTplFile" style="flex:1" placeholder="(same as folder)"></label>
-      </div>
-      <div class="mo-bar" style="margin:.3em 0">
-        <label style="flex:1;min-width:16em">Display title <input class="mo-text" id="moTplDisplay" style="flex:1" placeholder="(leave Jellyfin's title unchanged)"></label>
-        <span class="mo-meta">e.g. <code>{originalTitle}</code> to show native titles in Jellyfin</span>
-      </div>
-      <label class="mo-meta" style="margin-left:0;display:block">Regex clean-up rules, one per line: <code>pattern =&gt; replacement</code> (applied in order to every generated name)</label>
-      <textarea class="mo-text" id="moRules" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace" placeholder="^劇場版\s* =>&#10;\s*：\s* => - "></textarea>
-      <div class="mo-warn" id="moRulesErr"></div>
-      <div class="mo-meta" style="margin-left:0" id="moExample"></div>
-      <button is="emby-button" type="button" class="raised button-submit mo-small" id="moSaveNaming"><span>Save naming</span></button>
+  <!-- ============================================================ sticky control panel -->
+  <div class="mc-panel" id="mcPanel">
+    <div class="mc-bar">
+      <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcTabMovies"><span>Movies</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcTabSeries"><span>Series</span></button>
+      <span class="mc-sep"></span>
+      <input type="search" class="mc-text" id="mcFilter" placeholder="Filter by name or path" style="min-width:14em">
+      <label><input type="checkbox" id="mcOnlySus"> Suspicious</label>
+      <label><input type="checkbox" id="mcOnlyChanges"> With folder changes</label>
+      <label><input type="checkbox" id="mcOnlyUnlocked"> Unlocked</label>
+      <span class="mc-summary" id="mcSummary">Loading…</span>
     </div>
-  </details>
+    <div class="mc-bar">
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcSelectAll"><span>Select shown</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcSelectNone"><span>Select none</span></button>
+      <span class="mc-sep"></span>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchIdentify" title="Suggest a match for each selected item; review and apply"><span>Identify selected</span></button>
+      <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchFolders" title="Apply folder/file changes for the selected items"><span>Adjust folders</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcLockSel"><span>Lock</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcUnlockSel"><span>Unlock</span></button>
+      <span class="mc-sep"></span>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo"><span>Undo last folder change</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcRefresh"><span>Refresh</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcOpenNaming"><span>Naming &amp; options…</span></button>
+    </div>
+  </div>
 
-  <div class="mo-bar">
-    <label><input type="checkbox" id="moRename" checked> Rename folders &amp; files</label>
-    <label><input type="checkbox" id="moNfo" checked> Write NFO</label>
-    <label><input type="checkbox" id="moLock" checked> Lock NFO</label>
-    <label><input type="checkbox" id="moLockAfter" checked> Lock movies after fixing a match</label>
+  <div id="mcList"></div>
+
+  <!-- ============================================================ identify modal -->
+  <div class="mc-modal" id="mcIdentify" hidden>
+    <div class="mc-dialog">
+      <h3><span id="mcIdTitle">Identify</span>
+        <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button></h3>
+      <form class="mc-form" id="mcIdForm">
+        <input class="mc-text" id="mcIdName" placeholder="Name">
+        <input class="mc-text" id="mcIdYear" placeholder="Year" inputmode="numeric">
+        <div class="mc-ids">
+          <input class="mc-text" id="mcIdImdb" placeholder="IMDb ID (tt…)">
+          <input class="mc-text" id="mcIdTmdb" placeholder="TMDB ID">
+          <input class="mc-text" id="mcIdTvdb" placeholder="TVDB ID">
+        </div>
+        <div class="mc-wide mc-bar" style="margin:0">
+          <button is="emby-button" type="submit" class="raised button-submit mc-btn"><span>Search</span></button>
+          <label><input type="checkbox" id="mcIdImages" checked> Replace existing images</label>
+          <span class="mc-meta" id="mcIdStatus"></span>
+        </div>
+      </form>
+      <div class="mc-results" id="mcIdResults"></div>
+    </div>
   </div>
-  <div class="mo-bar">
-    <label><input type="checkbox" id="moOnlyChanges"> Only movies with changes</label>
-    <label><input type="checkbox" id="moOnlySus"> Only suspicious matches</label>
-    <label><input type="checkbox" id="moOnlyUnlocked"> Only unlocked</label>
-    <input type="search" class="mo-text" id="moFilter" placeholder="Filter by name or path">
+
+  <!-- ============================================================ batch identify modal -->
+  <div class="mc-modal" id="mcBatch" hidden>
+    <div class="mc-dialog">
+      <h3><span>Identify selected</span>
+        <span class="mc-bar" style="margin:0">
+          <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchApply"><span>Apply checked</span></button>
+          <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
+        </span></h3>
+      <p class="mc-meta" style="margin-top:0">Suggestions come from the file/folder names. Green = confident match (pre-ticked). Pick another result from the list, or untick to skip.</p>
+      <div class="mc-meta" id="mcBatchStatus"></div>
+      <div id="mcBatchList"></div>
+    </div>
   </div>
-  <div class="mo-bar">
-    <button is="emby-button" type="button" class="raised" id="moRefresh"><span>Refresh</span></button>
-    <button is="emby-button" type="button" class="raised" id="moSelectAll"><span>Select shown</span></button>
-    <button is="emby-button" type="button" class="raised" id="moSelectNone"><span>Select none</span></button>
-    <button is="emby-button" type="button" class="raised" id="moSuggest" title="Search TMDB using each file name; you accept each suggestion"><span>Suggest matches</span></button>
-    <button is="emby-button" type="button" class="raised" id="moLockSel"><span>Lock selected</span></button>
-    <button is="emby-button" type="button" class="raised" id="moUnlockSel"><span>Unlock selected</span></button>
-    <button is="emby-button" type="button" class="raised button-submit" id="moApply"><span>Apply folder changes</span></button>
-    <button is="emby-button" type="button" class="raised" id="moUndo"><span>Undo last apply</span></button>
+
+  <!-- ============================================================ naming & options modal -->
+  <div class="mc-modal" id="mcNaming" hidden>
+    <div class="mc-dialog">
+      <h3><span>Naming &amp; options</span>
+        <span class="mc-bar" style="margin:0">
+          <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcSaveNaming"><span>Save</span></button>
+          <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
+        </span></h3>
+
+      <div class="mc-bar">
+        <label><input type="checkbox" id="mcRename" checked> Rename folders &amp; files</label>
+        <label><input type="checkbox" id="mcNfo" checked> Write NFO</label>
+        <label><input type="checkbox" id="mcLockNfo" checked> Lock NFO</label>
+        <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying</label>
+        <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
+      </div>
+
+      <p class="mc-meta">Tokens: <code>{title}</code>, <code>{originalTitle}</code> (falls back to title), <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>, <code>{tvdb}</code>.
+        Series also: <code>{season}</code>, <code>{seasonTitle}</code>, <code>{episode}</code>, <code>{episodes}</code> (E05 / E05-E06), <code>{episodeTitle}</code>, <code>{series}</code>.
+        <code>{season:00}</code> pads numbers. Empty brackets and dangling dashes vanish when a value is missing; <code>:</code> becomes <code>：</code>.</p>
+
+      <div class="mc-movies-only">
+        <div class="mc-bar"><label style="flex:1">Folder&nbsp;<input class="mc-text" id="mcTplFolder" style="flex:1" placeholder="{originalTitle} ({year})"></label></div>
+        <div class="mc-bar"><label style="flex:1">File&nbsp;<input class="mc-text" id="mcTplFile" style="flex:1" placeholder="(same as folder)"></label></div>
+        <div class="mc-bar"><label style="flex:1">Display title&nbsp;<input class="mc-text" id="mcTplDisplay" style="flex:1" placeholder="(leave Jellyfin's title unchanged)"></label></div>
+      </div>
+      <div class="mc-series-only">
+        <div class="mc-bar"><label style="flex:1">Series folder&nbsp;<input class="mc-text" id="mcTplSeries" style="flex:1" placeholder="{originalTitle}"></label></div>
+        <div class="mc-bar"><label style="flex:1">Season folder&nbsp;<input class="mc-text" id="mcTplSeason" style="flex:1" placeholder="(empty = no season folders)"></label></div>
+        <div class="mc-bar"><label style="flex:1">Episode file&nbsp;<input class="mc-text" id="mcTplEpisode" style="flex:1" placeholder="{season}:{title} - {episode:00}"></label></div>
+        <div class="mc-bar"><label style="flex:1">Display title&nbsp;<input class="mc-text" id="mcTplSeriesDisplay" style="flex:1" placeholder="(leave Jellyfin's title unchanged)"></label></div>
+      </div>
+      <label class="mc-meta" style="display:block;margin-top:.6em">Regex clean-up rules, one per line: <code>pattern =&gt; replacement</code></label>
+      <textarea class="mc-text" id="mcRules" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace" placeholder="^劇場版\s* =>"></textarea>
+      <div class="mc-warn" id="mcRulesErr"></div>
+      <div class="mc-meta" id="mcExample" style="margin-top:.4em"></div>
+    </div>
   </div>
-  <div class="mo-summary" id="moSummary">Loading…</div>
-  <div id="moList"></div>
 </div>
 </div>
 
 <script type="text/javascript">
 (function () {
   var page = document.querySelector('#MovieCuratorPage');
+  var PLUGIN_ID = '7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93';
+  var DEFAULTS = {
+    folder: '{originalTitle} ({year})', series: '{originalTitle}',
+    season: 'Season {season} - {seasonTitle}', episode: '{season}:{title} - {episode:00}'
+  };
+  var type = 'movies';
   var plans = [];
   var selected = {};
-  var search = {}; // itemId -> { q, y, results, loading, error, best }
+  var open = {};          // itemId -> folder panel expanded
+  var identifyId = null;  // item shown in the identify modal
+  var batch = [];         // [{ id, query, year, results, pick, checked, confident, status }]
 
+  // ---------------------------------------------------------------- helpers
   function $(sel) { return page.querySelector(sel); }
+  function $$(sel) { return Array.prototype.slice.call(page.querySelectorAll(sel)); }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
-  }
-  function opts() {
-    return { rename: $('#moRename').checked, nfo: $('#moNfo').checked, lockNfo: $('#moLock').checked };
   }
   function http(method, path, body) {
     return fetch(ApiClient.getUrl(path), {
@@ -118,138 +201,164 @@
   function api(method, path, body) { return http(method, 'MovieCurator/' + path, body); }
   function planById(id) { return plans.filter(function (p) { return p.itemId === id; })[0]; }
   function short(p, root) { return root && p.indexOf(root + '/') === 0 ? p.slice(root.length + 1) : p; }
+  function idText(ids) { return Object.keys(ids || {}).sort().map(function (k) { return k + ' ' + ids[k]; }).join(' · ') || 'no IDs'; }
+  function poster(id, h) { return ApiClient.getUrl('Items/' + id + '/Images/Primary', { maxHeight: h || 240, quality: 85 }); }
+  function opts() {
+    return {
+      type: type, rename: $('#mcRename').checked, episodes: type === 'series' && $('#mcEpisodes').checked,
+      nfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
+    };
+  }
+  function selectedIds() { return Object.keys(selected).filter(function (id) { return planById(id); }); }
+  function noun(n) { return n + (type === 'series' ? ' series' : (n === 1 ? ' movie' : ' movies')); }
+  function opaque(c) { return c && c !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(c); }
+
+  // the sticky panel and dialogs need an opaque background matching the current theme
+  function themeBackground() {
+    for (var el = page; el && el !== document.documentElement; el = el.parentElement) {
+      var bg = getComputedStyle(el).backgroundColor;
+      if (opaque(bg)) { page.style.setProperty('--mc-bg', bg); return; }
+    }
+    var bodyBg = getComputedStyle(document.body).backgroundColor;
+    if (opaque(bodyBg)) page.style.setProperty('--mc-bg', bodyBg);
+  }
+  // keep the sticky panel below Jellyfin's own fixed header
+  function stickyOffset() {
+    var header = document.querySelector('.skinHeader, .MuiAppBar-root');
+    var fixed = header && /fixed|sticky/.test(getComputedStyle(header).position);
+    $('#mcPanel').style.top = (fixed ? header.getBoundingClientRect().height : 0) + 'px';
+  }
+
+  // ---------------------------------------------------------------- rows
   function opLine(op, root) {
     var from = op.from ? op.from.split('/').pop() : '', to = op.to.split('/').pop();
     switch (op.kind) {
       case 'mkdir': return '📁 new folder  ' + short(op.to, root) + '/';
       case 'dirmove': return '📁 rename folder  ' + from + '/  →  ' + to + '/';
+      case 'rmdir': return '🗑 remove empty folder  ' + short(op.to, root) + '/';
       case 'nfo': return '📝 write ' + to + (op.note ? '  (' + op.note + ')' : '');
       case 'display': return '🏷 title  ' + op.from + '  →  ' + op.to;
-      default: return '   ' + from + '  →  ' + to + (op.note ? '  (' + op.note + ')' : '');
+      default:
+        var moved = op.from.slice(0, op.from.lastIndexOf('/')) !== op.to.slice(0, op.to.lastIndexOf('/'));
+        return '   ' + from + '  →  ' + (moved ? short(op.to, root) : to) + (op.note ? '  (' + op.note + ')' : '');
     }
   }
-  function idText(ids) {
-    return Object.keys(ids || {}).sort().map(function (k) { return k + ' ' + ids[k]; }).join(', ') || 'no IDs';
+
+  function folderPanel(p) {
+    var h = '<div class="mc-folder">' +
+      '<div class="mc-name"><span class="mc-meta">Folder name</span>' +
+      '<input class="mc-text mc-title-input" value="' + esc(p.title) + '" data-orig="' + esc(p.title) + '" title="Edit and press Enter">' +
+      '<button is="emby-button" type="button" class="raised mc-btn mc-save-name" style="display:none"><span>Save name</span></button>' +
+      (p.titleSource === 'custom' ? '<button is="emby-button" type="button" class="raised mc-btn mc-reset-name"><span>Reset</span></button>' : '') +
+      '</div>' +
+      '<div class="mc-meta">' + esc(short(p.path, p.root)) + (p.kind === 'series' ? '/' : '') + '</div>';
+    if (p.kind === 'series') {
+      if (p.mergedFolders && p.mergedFolders.length) {
+        h += '<div class="mc-meta">🔗 Same show, merged here as seasons: <b>' +
+          p.mergedFolders.map(function (f) { return esc(short(f, p.root)) + '/'; }).join(', ') + '</b></div>';
+      }
+      h += '<div class="mc-meta">' + p.episodeCount + ' episode file(s)' +
+        (p.episodesSkipped ? ' · ' + p.episodesSkipped + ' without episode number (left alone)' : '') +
+        (p.season != null ? ' · season for episodes Jellyfin couldn\'t place: <input class="mc-text mc-season" type="number" min="0" max="99" style="width:4.5em;padding:.1em .3em" value="' +
+          p.season + '"> <span class="mc-tag' + (p.seasonSource === 'custom' ? ' info' : '') + '">' + esc(p.seasonSource) + '</span>' : '') +
+        '</div>';
+    }
+    h += p.warnings.map(function (w) { return '<div class="mc-warn">⚠ ' + esc(w) + '</div>'; }).join('');
+    h += p.ops.length
+      ? '<div class="mc-ops">' + p.ops.map(function (o) { return esc(opLine(o, p.root)); }).join('\n') + '</div>'
+      : '<div class="mc-meta">Nothing to change.</div>';
+    return h + '</div>';
   }
 
-  // ---------------------------------------------------------------- rendering
-  function searchPanel(p) {
-    var s = search[p.itemId];
-    if (!s) return '';
-    var html = '<div class="mo-search"><form class="mo-search-form">' +
-      '<input class="mo-text mo-q" value="' + esc(s.q) + '" placeholder="Title, or tt1234567 / tmdb:123">' +
-      '<input class="mo-text mo-y" value="' + esc(s.y || '') + '" placeholder="Year">' +
-      '<button is="emby-button" type="submit" class="raised mo-small"><span>Search</span></button>' +
-      '<button is="emby-button" type="button" class="raised mo-small mo-close"><span>Close</span></button></form>';
-    if (s.loading) html += '<div class="mo-meta">Searching…</div>';
-    if (s.error) html += '<div class="mo-warn">' + esc(s.error) + '</div>';
-    if (s.results && !s.results.length) html += '<div class="mo-meta">No results. Try another title or remove the year.</div>';
-    (s.results || []).slice(0, 8).forEach(function (r, i) {
-      html += '<div class="mo-res' + (s.best === i ? ' mo-best' : '') + '">' +
-        (r.ImageUrl ? '<img loading="lazy" src="' + esc(r.ImageUrl) + '">' : '<img alt="">') +
-        '<div class="mo-res-main"><b>' + esc(r.Name) + '</b> (' + esc(r.ProductionYear || '?') + ')' +
-        (s.best === i ? ' <span class="mo-tag lock">suggested</span>' : '') +
-        '<div class="mo-meta" style="margin:0">' + esc(idText(r.ProviderIds)) + ' · ' + esc(r.SearchProviderName || '') + '</div>' +
-        (r.Overview ? '<div class="mo-res-ov">' + esc(r.Overview) + '</div>' : '') + '</div>' +
-        '<button is="emby-button" type="button" class="raised button-submit mo-small mo-use" data-i="' + i + '"><span>Use this</span></button></div>';
-    });
-    return html + '</div>';
-  }
-
-  function card(p) {
+  function row(p) {
     var tags = [];
-    if (p.locked) tags.push('<span class="mo-tag lock">🔒 locked</span>');
-    if (p.suspicious) tags.push('<span class="mo-tag warn">check match</span>');
-    if (p.titleSource === 'custom') tags.push('<span class="mo-tag custom">custom name</span>');
-    if (p.titleSource === 'filename') tags.push('<span class="mo-tag warn">name from filename</span>');
-    if (!p.ops.length) tags.push('<span class="mo-tag">folder tidy</span>');
+    if (p.locked) tags.push('<span class="mc-tag ok">🔒 locked</span>');
+    if (p.suspicious) tags.push('<span class="mc-tag warn">check match</span>');
+    if (p.seasonConflict) tags.push('<span class="mc-tag warn">season numbering conflict</span>');
+    if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
+    if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
+    var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
     var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
-    return '<div class="mo-card' + (p.suspicious ? ' mo-sus' : '') + '" data-id="' + p.itemId + '">' +
-      '<div class="mo-head"><input type="checkbox" class="mo-sel"' + (selected[p.itemId] ? ' checked' : '') + '>' +
-      '<div class="mo-main">' +
-        '<div class="mo-name">' +
-          '<input class="mo-title" value="' + esc(p.title) + '" data-orig="' + esc(p.title) + '" title="Folder / file name - edit and press Enter">' +
-          tags.join(' ') +
-          '<button is="emby-button" type="button" class="raised mo-small mo-save" style="display:none"><span>Save name</span></button>' +
-          (p.titleSource === 'custom' ? '<button is="emby-button" type="button" class="raised mo-small mo-reset"><span>Reset name</span></button>' : '') +
-          '<button is="emby-button" type="button" class="raised mo-small mo-open-search"><span>Fix match…</span></button>' +
-          '<button is="emby-button" type="button" class="raised mo-small mo-toggle-lock"><span>' + (p.locked ? 'Unlock' : 'Lock') + '</span></button>' +
-          '<a is="emby-linkbutton" class="raised emby-button mo-small" href="' + detailsUrl + '">Open</a>' +
+    var nChanges = p.ops.length, nWarn = p.warnings.length;
+    return '<div class="mc-row' + (p.suspicious ? ' mc-sus' : '') + (selected[p.itemId] ? ' mc-selected' : '') + '" data-id="' + p.itemId + '">' +
+      '<input type="checkbox" class="mc-sel"' + (selected[p.itemId] ? ' checked' : '') + '>' +
+      '<img class="mc-poster" loading="lazy" alt="" src="' + esc(poster(p.itemId)) + '" onerror="this.classList.add(\'mc-noimg\')">' +
+      '<div class="mc-body">' +
+        '<div class="mc-title">' + esc(p.jellyfinName) + ' <span class="mc-year">(' + (p.year || '?') + ')</span>' + tags.join('') + '</div>' +
+        '<div class="mc-meta">' + orig + esc(idText(p.providerIds)) + '</div>' +
+        '<div class="mc-desc">' + (p.overview ? esc(p.overview) : '<i>No description.</i>') + '</div>' +
+        '<div class="mc-actions">' +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-lock"><span>' + (p.locked ? 'Unlock' : 'Lock') + '</span></button>' +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-identify"><span>Re-identify</span></button>' +
+          '<a is="emby-linkbutton" class="raised emby-button mc-btn" href="' + detailsUrl + '">Open</a>' +
+          '<span class="mc-folder-toggle">📁 ' + (nChanges ? nChanges + ' folder change' + (nChanges > 1 ? 's' : '') : 'folder tidy') +
+            (nWarn ? ' · <span class="mc-warn">' + nWarn + ' note' + (nWarn > 1 ? 's' : '') + '</span>' : '') + (open[p.itemId] ? ' ▾' : ' ▸') + '</span>' +
         '</div>' +
-        '<div class="mo-meta">Jellyfin: <b>' + esc(p.jellyfinName) + '</b>' +
-          (p.originalTitle && p.originalTitle !== p.jellyfinName ? ' / ' + esc(p.originalTitle) : '') +
-          ' (' + (p.year || '?') + ') · ' + esc(idText(p.providerIds)) + '<br>' + esc(short(p.path, p.root)) + '</div>' +
-        p.warnings.map(function (w) { return '<div class="mo-warn">⚠ ' + esc(w) + '</div>'; }).join('') +
-        searchPanel(p) +
-        (p.ops.length ? '<details' + (p.ops.length <= 4 ? ' open' : '') + '><summary>' + p.ops.length + ' folder/file change(s)</summary>' +
-          '<div class="mo-ops">' + p.ops.map(function (o) { return esc(opLine(o, p.root)); }).join('\n') + '</div></details>' : '') +
-      '</div></div></div>';
+        (open[p.itemId] ? folderPanel(p) : '') +
+      '</div></div>';
   }
 
   function visible() {
-    var f = $('#moFilter').value.toLowerCase();
+    var f = $('#mcFilter').value.toLowerCase();
     return plans.filter(function (p) {
-      if ($('#moOnlyChanges').checked && !p.ops.length && !p.warnings.length) return false;
-      if ($('#moOnlySus').checked && !p.suspicious) return false;
-      if ($('#moOnlyUnlocked').checked && p.locked) return false;
-      if (f && (p.title + ' ' + p.path + ' ' + p.jellyfinName).toLowerCase().indexOf(f) < 0) return false;
+      if ($('#mcOnlyChanges').checked && !p.ops.length) return false;
+      if ($('#mcOnlySus').checked && !p.suspicious && !p.seasonConflict) return false;
+      if ($('#mcOnlyUnlocked').checked && p.locked) return false;
+      if (f && (p.jellyfinName + ' ' + (p.originalTitle || '') + ' ' + p.title + ' ' + p.path).toLowerCase().indexOf(f) < 0) return false;
       return true;
     });
   }
 
-  function render() {
-    var shown = visible();
-    var c = { ops: 0, sel: 0, sus: 0, lock: 0 };
-    plans.forEach(function (p) {
-      if (p.ops.length) c.ops++; if (selected[p.itemId]) c.sel++; if (p.suspicious) c.sus++; if (p.locked) c.lock++;
-    });
-    $('#moSummary').textContent = plans.length + ' movies · ' + c.sus + ' suspicious · ' + c.lock + ' locked · ' +
-      c.ops + ' with folder changes · ' + c.sel + ' selected · showing ' + shown.length;
-    $('#moList').innerHTML = shown.map(card).join('');
+  function summary() {
+    var c = { sus: 0, lock: 0, ops: 0 };
+    plans.forEach(function (p) { if (p.suspicious || p.seasonConflict) c.sus++; if (p.locked) c.lock++; if (p.ops.length) c.ops++; });
+    var n = selectedIds().length;
+    $('#mcSummary').textContent = noun(plans.length) + ' · ' + c.sus + ' to check · ' + c.lock + ' locked · ' + c.ops + ' with folder changes · ' +
+      (n ? n + ' selected' : 'none selected');
+    ['#mcBatchIdentify', '#mcBatchFolders', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
   }
 
-  function renderCard(id) {
-    var el = page.querySelector('.mo-card[data-id="' + id + '"]');
-    var p = planById(id);
-    if (el && p) el.outerHTML = card(p);
+  function render() {
+    $('#mcList').innerHTML = visible().map(row).join('') || '<p class="mc-meta" style="padding:1em">Nothing to show.</p>';
+    summary();
+  }
+
+  function renderRow(id) {
+    var el = page.querySelector('.mc-row[data-id="' + id + '"]'), p = planById(id);
+    if (el && p) el.outerHTML = row(p);
+    summary();
   }
 
   function load() {
-    $('#moSummary').textContent = 'Building preview…';
+    $('#mcSummary').textContent = 'Loading…';
     var o = opts();
-    return api('GET', 'Plan?rename=' + o.rename + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo).then(function (data) {
-      plans = data;
-      var ids = {};
-      plans.forEach(function (p) { ids[p.itemId] = true; });
-      Object.keys(selected).forEach(function (k) { if (!ids[k]) delete selected[k]; });
-      Object.keys(search).forEach(function (k) { if (!ids[k]) delete search[k]; });
-      render();
-    }).catch(function (e) { $('#moSummary').textContent = 'Failed to load: ' + e.message; });
+    return api('GET', 'Plan?type=' + o.type + '&rename=' + o.rename + '&episodes=' + o.episodes + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo)
+      .then(function (data) {
+        plans = data;
+        Object.keys(selected).forEach(function (k) { if (!planById(k)) delete selected[k]; });
+        render();
+      })
+      .catch(function (e) { $('#mcSummary').textContent = 'Failed to load: ' + e.message; });
   }
+
+  // ---------------------------------------------------------------- modals
+  function showModal(id) { $(id).hidden = false; document.body.style.overflow = 'hidden'; }
+  function hideModal(id) {
+    $(id).hidden = true;
+    if (!$$('.mc-modal').some(function (m) { return !m.hidden; })) document.body.style.overflow = '';
+  }
+  $$('.mc-modal').forEach(function (m) {
+    m.addEventListener('click', function (e) { if (e.target === m || e.target.closest('.mc-close')) hideModal('#' + m.id); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') $$('.mc-modal').forEach(function (m) { if (!m.hidden) hideModal('#' + m.id); });
+  });
 
   // ---------------------------------------------------------------- identify (Jellyfin's own Identify API)
-  function parseQuery(q, y) {
-    var info = { Name: '', ProviderIds: {} };
-    q = (q || '').trim();
-    var m;
-    if (/^tt\d+$/i.test(q)) info.ProviderIds.Imdb = q;
-    else if ((m = /^tmdb:(\d+)$/i.exec(q))) info.ProviderIds.Tmdb = m[1];
-    else info.Name = q;
-    if (y && /^\d{4}$/.test(String(y).trim())) info.Year = parseInt(y, 10);
-    return info;
-  }
-
-  function runSearch(id, providerName) {
-    var s = search[id];
-    s.loading = true; s.error = null; s.results = null; s.best = null;
-    renderCard(id);
-    var body = { SearchInfo: parseQuery(s.q, s.y), ItemId: id, IncludeDisabledProviders: true };
-    if (providerName) body.SearchProviderName = providerName;
-    return http('POST', 'Items/RemoteSearch/Movie', body).then(function (res) {
-      s.results = res || [];
-      s.best = bestMatch(s.results, s.q, s.y);
-    }).catch(function (e) { s.error = 'Search failed: ' + e.message; })
-      .then(function () { s.loading = false; renderCard(id); });
+  function remoteSearch(p, info, provider) {
+    var body = { SearchInfo: info, ItemId: p.itemId, IncludeDisabledProviders: true };
+    if (provider) body.SearchProviderName = provider;
+    return http('POST', 'Items/RemoteSearch/' + (p.kind === 'series' ? 'Series' : 'Movie'), body).then(function (r) { return r || []; });
   }
 
   function norm(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9À-￿]+/g, ' ').trim(); }
@@ -264,35 +373,164 @@
       score -= i * 0.1;
       if (score > bestScore) { bestScore = score; best = i; }
     });
-    return bestScore >= 2.5 ? best : null; // only highlight confident suggestions
+    return bestScore >= 2.5 ? best : null;
   }
 
-  function openSearch(id, providerName) {
+  /** Apply a search result like Jellyfin's Identify. Locked items ignore metadata updates, so unlock first. */
+  function applyMatch(p, result, replaceImages) {
+    var relock = $('#mcLockAfter').checked || p.locked;
+    var pre = p.locked ? api('POST', 'Lock', { itemIds: [p.itemId], locked: false }) : Promise.resolve();
+    return pre
+      .then(function () { return http('POST', 'Items/RemoteSearch/Apply/' + p.itemId + '?ReplaceAllImages=' + (replaceImages !== false), result); })
+      .then(function () { return relock ? api('POST', 'Lock', { itemIds: [p.itemId], locked: true }) : null; });
+  }
+
+  function openIdentify(id) {
     var p = planById(id);
-    if (!search[id]) search[id] = { q: p.guessName || p.jellyfinName, y: p.guessYear || '' };
-    return runSearch(id, providerName);
+    identifyId = id;
+    $('#mcIdTitle').textContent = 'Identify: ' + p.jellyfinName;
+    $('#mcIdName').value = p.guessName || p.jellyfinName;
+    $('#mcIdYear').value = p.guessYear || '';
+    $('#mcIdImdb').value = '';
+    $('#mcIdTmdb').value = '';
+    $('#mcIdTvdb').value = '';
+    $('#mcIdTvdb').style.display = p.kind === 'series' ? '' : 'none';
+    $('#mcIdResults').innerHTML = '';
+    $('#mcIdStatus').textContent = '';
+    showModal('#mcIdentify');
+    runIdentifySearch();
   }
 
-  function useResult(id, i) {
-    var p = planById(id), r = search[id].results[i];
-    var lockAfter = $('#moLockAfter').checked;
-    $('#moSummary').textContent = 'Applying "' + r.Name + '" to ' + p.jellyfinName + '…';
-    // A locked item ignores metadata updates, so unlock first
-    var pre = p.locked ? api('POST', 'Lock', { itemIds: [id], locked: false }) : Promise.resolve();
-    return pre.then(function () {
-      return http('POST', 'Items/RemoteSearch/Apply/' + id + '?ReplaceAllImages=true', r);
-    }).then(function () {
-      return lockAfter || p.locked ? api('POST', 'Lock', { itemIds: [id], locked: true }) : null;
-    }).then(function () {
-      delete search[id];
+  var lastResults = [];
+  function runIdentifySearch() {
+    var p = planById(identifyId);
+    var info = { Name: $('#mcIdName').value.trim(), ProviderIds: {} };
+    var y = $('#mcIdYear').value.trim();
+    if (/^\d{4}$/.test(y)) info.Year = parseInt(y, 10);
+    if ($('#mcIdImdb').value.trim()) info.ProviderIds.Imdb = $('#mcIdImdb').value.trim();
+    if ($('#mcIdTmdb').value.trim()) info.ProviderIds.Tmdb = $('#mcIdTmdb').value.trim();
+    if ($('#mcIdTvdb').value.trim()) info.ProviderIds.Tvdb = $('#mcIdTvdb').value.trim();
+    $('#mcIdStatus').textContent = 'Searching…';
+    $('#mcIdResults').innerHTML = '';
+    remoteSearch(p, info).then(function (results) {
+      lastResults = results;
+      var best = bestMatch(results, info.Name, y);
+      $('#mcIdStatus').textContent = results.length ? results.length + ' result(s)' : 'No results. Try another name, remove the year, or enter an ID.';
+      $('#mcIdResults').innerHTML = results.slice(0, 24).map(function (r, i) {
+        return '<div class="mc-result' + (i === best ? ' mc-best' : '') + '">' +
+          (r.ImageUrl ? '<img loading="lazy" src="' + esc(r.ImageUrl) + '">' : '<img alt="">') +
+          '<b>' + esc(r.Name) + '</b><span class="mc-meta">' + esc(r.ProductionYear || '?') + ' · ' + esc(r.SearchProviderName || '') + '</span>' +
+          '<span class="mc-meta">' + esc(idText(r.ProviderIds)) + '</span>' +
+          (r.Overview ? '<span class="mc-ov">' + esc(r.Overview) + '</span>' : '') +
+          '<button is="emby-button" type="button" class="raised button-submit mc-btn mc-apply-result" data-i="' + i + '"><span>Apply</span></button>' +
+        '</div>';
+      }).join('');
+    }).catch(function (e) { $('#mcIdStatus').textContent = 'Search failed: ' + e.message; });
+  }
+
+  $('#mcIdForm').addEventListener('submit', function (e) { e.preventDefault(); runIdentifySearch(); });
+  $('#mcIdResults').addEventListener('click', function (e) {
+    var b = e.target.closest('.mc-apply-result');
+    if (!b) return;
+    var p = planById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
+    $('#mcIdStatus').textContent = 'Applying "' + r.Name + '"…';
+    $$('.mc-apply-result').forEach(function (x) { x.disabled = true; });
+    applyMatch(p, r, $('#mcIdImages').checked).then(function () {
+      hideModal('#mcIdentify');
       return load();
-    }).catch(function (e) { Dashboard.alert('Could not apply match: ' + e.message); load(); });
+    }).catch(function (err) {
+      $('#mcIdStatus').textContent = 'Could not apply: ' + err.message;
+      $$('.mc-apply-result').forEach(function (x) { x.disabled = false; });
+    });
+  });
+
+  // ---------------------------------------------------------------- batch identify
+  function renderBatch() {
+    $('#mcBatchList').innerHTML = batch.map(function (b, i) {
+      var p = planById(b.id), r = b.results && b.results[b.pick];
+      var choice = b.results === null ? '<span class="mc-meta">Searching…</span>'
+        : !b.results.length ? '<span class="mc-meta">No results. Use Re-identify on this row.</span>'
+        : '<select class="mc-text mc-batch-pick" data-i="' + i + '">' + b.results.slice(0, 8).map(function (x, j) {
+            return '<option value="' + j + '"' + (j === b.pick ? ' selected' : '') + '>' + esc(x.Name) + ' (' + (x.ProductionYear || '?') + ') · ' + esc(x.SearchProviderName || '') + '</option>';
+          }).join('') + '</select>' + (b.confident ? ' <span class="mc-tag ok">confident</span>' : '');
+      return '<div class="mc-batch-row">' +
+        '<input type="checkbox" class="mc-batch-check" data-i="' + i + '"' + (b.checked ? ' checked' : '') + (r ? '' : ' disabled') + '>' +
+        '<img alt="" src="' + esc(poster(b.id, 140)) + '" onerror="this.style.visibility=\'hidden\'">' +
+        '<div><b>' + esc(p ? p.jellyfinName : b.id) + '</b> <span class="mc-meta">(' + esc(p && p.year || '?') + ')</span>' +
+          '<div class="mc-meta">searched: ' + esc(b.query) + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
+          (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
+        '<span class="mc-arrow">→</span>' +
+        (r && r.ImageUrl ? '<img alt="" src="' + esc(r.ImageUrl) + '">' : '<img alt="" style="visibility:hidden">') +
+        '<div>' + choice + '</div>' +
+      '</div>';
+    }).join('');
+    var n = batch.filter(function (b) { return b.checked; }).length;
+    $('#mcBatchApply').disabled = !n;
+    $('#mcBatchApply').querySelector('span').textContent = 'Apply checked (' + n + ')';
   }
 
-  // ---------------------------------------------------------------- naming settings
-  var PLUGIN_ID = '7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93';
-  var DEFAULT_FOLDER = '{originalTitle} ({year})';
+  $('#mcBatchIdentify').addEventListener('click', function () {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    batch = ids.map(function (id) {
+      var p = planById(id);
+      return { id: id, query: p.guessName || p.jellyfinName, year: p.guessYear || '', results: null, pick: 0, checked: false };
+    });
+    $('#mcBatchStatus').textContent = 'Searching ' + batch.length + ' item(s)…';
+    showModal('#mcBatch');
+    renderBatch();
+    var queue = batch.slice();
+    function next() {
+      var b = queue.shift();
+      if (!b) return null;
+      var p = planById(b.id), info = { Name: b.query, ProviderIds: {} };
+      if (b.year) info.Year = b.year;
+      // movies: TMDB only (anime providers mis-match live-action films); series: every provider
+      return remoteSearch(p, info, p.kind === 'series' ? null : 'TheMovieDb')
+        .then(function (res) {
+          b.results = res;
+          var best = bestMatch(res, b.query, b.year);
+          b.pick = best == null ? 0 : best;
+          b.confident = best != null;
+          b.checked = best != null;
+        })
+        .catch(function (e) { b.results = []; b.status = 'Search failed: ' + e.message; })
+        .then(function () { renderBatch(); return next(); });
+    }
+    Promise.all([next(), next(), next()]).then(function () {
+      var c = batch.filter(function (b) { return b.confident; }).length;
+      $('#mcBatchStatus').textContent = c + ' of ' + batch.length + ' have a confident match. Review, then Apply checked.';
+    });
+  });
 
+  $('#mcBatchList').addEventListener('change', function (e) {
+    var i = parseInt(e.target.getAttribute('data-i'), 10);
+    if (e.target.classList.contains('mc-batch-check')) batch[i].checked = e.target.checked;
+    if (e.target.classList.contains('mc-batch-pick')) { batch[i].pick = parseInt(e.target.value, 10); batch[i].checked = true; }
+    renderBatch();
+  });
+
+  $('#mcBatchApply').addEventListener('click', function () {
+    var todo = batch.filter(function (b) { return b.checked && b.results && b.results[b.pick]; });
+    if (!todo.length) return;
+    $('#mcBatchApply').disabled = true;
+    var n = 0, chain = Promise.resolve();
+    todo.forEach(function (b) {
+      chain = chain.then(function () {
+        $('#mcBatchStatus').textContent = 'Applying ' + (++n) + ' of ' + todo.length + '…';
+        return applyMatch(planById(b.id), b.results[b.pick], true)
+          .then(function () { b.status = '✔ applied'; b.checked = false; })
+          .catch(function (e) { b.status = 'Failed: ' + e.message; })
+          .then(renderBatch);
+      });
+    });
+    chain.then(function () {
+      $('#mcBatchStatus').textContent = 'Done. Close this window to see the updated list.';
+      return load();
+    });
+  });
+
+  // ---------------------------------------------------------------- naming & options
   function parseRules(text) {
     var rules = [], errors = [];
     text.split('\n').forEach(function (line, n) {
@@ -305,149 +543,186 @@
     });
     return { rules: rules, errors: errors };
   }
-  function renderTpl(tpl, p, rules) {
+  function renderTpl(tpl, p, rules, extra) {
+    var ids = p.providerIds || {};
     var tok = {
       title: p.jellyfinName || '', originaltitle: p.originalTitle || p.jellyfinName || '', year: p.year || '',
-      tmdb: (p.providerIds || {}).Tmdb || '', imdb: (p.providerIds || {}).Imdb || ''
+      tmdb: ids.Tmdb || '', imdb: ids.Imdb || '', tvdb: ids.Tvdb || ''
     };
-    var s = tpl.replace(/\{(\w+)\}/g, function (m, k) { return k.toLowerCase() in tok ? tok[k.toLowerCase()] : m; });
-    s = s.replace(/\(\s*\)|\[\s*\]|\[(imdbid|tmdbid)-\]/gi, '').replace(/\s{2,}/g, ' ').replace(/^[\s\-–—_.]+|[\s\-–—_]+$/g, '').trim();
+    Object.keys(extra || {}).forEach(function (k) { tok[k.toLowerCase()] = extra[k]; });
+    var s = tpl.replace(/\{(\w+)(?::([^}]*))?\}/g, function (m, k, fmt) {
+      k = k.toLowerCase();
+      if (!(k in tok)) return m;
+      var v = tok[k];
+      if (v == null) return '';
+      return fmt && typeof v === 'number' ? String(v).padStart(fmt.length, '0') : String(v);
+    });
+    s = s.replace(/\(\s*\)|\[\s*\]|\[(imdbid|tmdbid|tvdbid)-\]/gi, '').replace(/\s{2,}/g, ' ').replace(/^[\s\-–—_.]+|[\s\-–—_]+$/g, '').trim();
     rules.forEach(function (r) { try { s = s.replace(new RegExp(r.Pattern, 'g'), r.Replacement); } catch (e) { /* invalid */ } });
     return s.trim();
   }
+  function fsName(s) { return s.replace(/:/g, '：').replace(/\//g, '／'); }
+
   function namingExample() {
-    var r = parseRules($('#moRules').value);
-    $('#moRulesErr').textContent = r.errors.join('  ');
-    var sample = plans.filter(function (p) { return p.providerIds && (p.providerIds.Tmdb || p.providerIds.Imdb) && p.originalTitle && p.originalTitle !== p.jellyfinName; })[0] ||
-      plans.filter(function (p) { return p.providerIds && p.providerIds.Tmdb; })[0];
-    if (!sample) { $('#moExample').textContent = ''; return; }
-    var folder = renderTpl($('#moTplFolder').value || DEFAULT_FOLDER, sample, r.rules);
-    var file = $('#moTplFile').value ? renderTpl($('#moTplFile').value, sample, r.rules) : folder;
-    var display = $('#moTplDisplay').value ? renderTpl($('#moTplDisplay').value, sample, r.rules) : sample.jellyfinName;
-    $('#moExample').innerHTML = 'Example (' + esc(sample.jellyfinName) + '): <code>' + esc(folder) + '/' + esc(file) + '.mkv</code> · shown as <b>' + esc(display) + '</b>';
+    var r = parseRules($('#mcRules').value);
+    $('#mcRulesErr').textContent = r.errors.join('  ');
+    var sample = plans.filter(function (p) { return p.originalTitle && p.originalTitle !== p.jellyfinName; })[0] || plans[0];
+    if (!sample) { $('#mcExample').textContent = ''; return; }
+    if (type === 'series') {
+      var folder = fsName(renderTpl($('#mcTplSeries').value || DEFAULTS.series, sample, r.rules));
+      var tokens = { season: 1, episode: 5, episodes: 'E05', seasonTitle: '', episodeTitle: 'Episode title', series: folder };
+      var sTpl = $('#mcTplSeason').value;
+      var sDir = sTpl.trim() ? fsName(renderTpl(sTpl, sample, r.rules, tokens)) + '/' : '';
+      var ep = fsName(renderTpl($('#mcTplEpisode').value || DEFAULTS.episode, sample, r.rules, tokens));
+      $('#mcExample').innerHTML = 'Example (' + esc(sample.jellyfinName) + ', S1 E5): <code>' + esc(folder) + '/' + esc(sDir) + esc(ep) + '.mkv</code>';
+    } else {
+      var f = fsName(renderTpl($('#mcTplFolder').value || DEFAULTS.folder, sample, r.rules));
+      var file = $('#mcTplFile').value ? fsName(renderTpl($('#mcTplFile').value, sample, r.rules)) : f;
+      var disp = $('#mcTplDisplay').value ? renderTpl($('#mcTplDisplay').value, sample, r.rules) : sample.jellyfinName;
+      $('#mcExample').innerHTML = 'Example (' + esc(sample.jellyfinName) + '): <code>' + esc(f) + '/' + esc(file) + '.mkv</code> · shown as <b>' + esc(disp) + '</b>';
+    }
   }
+
   function loadNaming() {
     return ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
-      $('#moTplFolder').value = cfg.FolderTemplate || '';
-      $('#moTplFile').value = cfg.FileTemplate || '';
-      $('#moTplDisplay').value = cfg.DisplayTemplate || '';
-      $('#moRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
-      $('#moNamingSummary').textContent = '· folder: ' + (cfg.FolderTemplate || DEFAULT_FOLDER) +
-        (cfg.DisplayTemplate ? ' · title: ' + cfg.DisplayTemplate : '');
+      $('#mcTplFolder').value = cfg.FolderTemplate || '';
+      $('#mcTplFile').value = cfg.FileTemplate || '';
+      $('#mcTplDisplay').value = cfg.DisplayTemplate || '';
+      $('#mcTplSeries').value = cfg.SeriesFolderTemplate || '';
+      $('#mcTplSeason').value = cfg.SeasonFolderTemplate == null ? DEFAULTS.season : cfg.SeasonFolderTemplate;
+      $('#mcTplEpisode').value = cfg.EpisodeTemplate || '';
+      $('#mcTplSeriesDisplay').value = cfg.SeriesDisplayTemplate || '';
+      $('#mcRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
       namingExample();
     });
   }
-  $('#moSaveNaming').addEventListener('click', function () {
-    var r = parseRules($('#moRules').value);
+
+  function syncTypeVisibility() {
+    $$('.mc-series-only').forEach(function (el) { el.style.display = type === 'series' ? '' : 'none'; });
+    $$('.mc-movies-only').forEach(function (el) { el.style.display = type === 'movies' ? '' : 'none'; });
+  }
+
+  $('#mcOpenNaming').addEventListener('click', function () { syncTypeVisibility(); loadNaming(); showModal('#mcNaming'); });
+  $('#mcSaveNaming').addEventListener('click', function () {
+    var r = parseRules($('#mcRules').value);
     if (r.errors.length) { Dashboard.alert('Fix the regex rules first:\n' + r.errors.join('\n')); return; }
     ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
-      cfg.FolderTemplate = $('#moTplFolder').value.trim() || DEFAULT_FOLDER;
-      cfg.FileTemplate = $('#moTplFile').value.trim();
-      cfg.DisplayTemplate = $('#moTplDisplay').value.trim();
+      cfg.FolderTemplate = $('#mcTplFolder').value.trim() || DEFAULTS.folder;
+      cfg.FileTemplate = $('#mcTplFile').value.trim();
+      cfg.DisplayTemplate = $('#mcTplDisplay').value.trim();
+      cfg.SeriesFolderTemplate = $('#mcTplSeries').value.trim() || DEFAULTS.series;
+      cfg.SeasonFolderTemplate = $('#mcTplSeason').value.trim(); // empty = no season folders
+      cfg.EpisodeTemplate = $('#mcTplEpisode').value.trim() || DEFAULTS.episode;
+      cfg.SeriesDisplayTemplate = $('#mcTplSeriesDisplay').value.trim();
       cfg.CleanupRules = r.rules;
       return ApiClient.updatePluginConfiguration(PLUGIN_ID, cfg);
-    }).then(function () { return loadNaming(); }).then(load)
+    }).then(function () { hideModal('#mcNaming'); return load(); })
       .catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
   });
-  ['#moTplFolder', '#moTplFile', '#moTplDisplay', '#moRules'].forEach(function (s) { $(s).addEventListener('input', namingExample); });
+  ['#mcTplFolder', '#mcTplFile', '#mcTplDisplay', '#mcTplSeries', '#mcTplSeason', '#mcTplEpisode', '#mcTplSeriesDisplay', '#mcRules']
+    .forEach(function (s) { $(s).addEventListener('input', namingExample); });
+  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes'].forEach(function (s) { $(s).addEventListener('change', load); });
 
-  // ---------------------------------------------------------------- events
-  page.addEventListener('pageshow', function () { load().then(loadNaming); });
-  ['#moRename', '#moNfo', '#moLock'].forEach(function (s) { $(s).addEventListener('change', load); });
-  ['#moOnlyChanges', '#moOnlySus', '#moOnlyUnlocked'].forEach(function (s) { $(s).addEventListener('change', render); });
-  $('#moFilter').addEventListener('input', render);
-  $('#moRefresh').addEventListener('click', load);
-  $('#moSelectAll').addEventListener('click', function () { visible().forEach(function (p) { selected[p.itemId] = true; }); render(); });
-  $('#moSelectNone').addEventListener('click', function () { selected = {}; render(); });
-
-  $('#moSuggest').addEventListener('click', function () {
-    var targets = Object.keys(selected);
-    if (!targets.length) targets = visible().filter(function (p) { return p.suspicious; }).map(function (p) { return p.itemId; });
-    if (!targets.length) { Dashboard.alert('Select movies, or show some suspicious ones, first.'); return; }
-    if (targets.length > 40 && !confirm('Search TMDB for ' + targets.length + ' movies?')) return;
-    var queue = targets.slice();
-    function next() { var id = queue.shift(); return id ? openSearch(id, 'TheMovieDb').then(next) : null; }
-    Promise.all([next(), next(), next()]).then(function () {
-      $('#moSummary').textContent += ' · suggestions ready (green = confident match)';
-    });
-  });
+  // ---------------------------------------------------------------- panel events
+  function setType(t) {
+    if (type === t) return;
+    type = t;
+    selected = {}; open = {};
+    $('#mcTabMovies').classList.toggle('button-submit', type === 'movies');
+    $('#mcTabSeries').classList.toggle('button-submit', type === 'series');
+    syncTypeVisibility();
+    load();
+  }
+  $('#mcTabMovies').addEventListener('click', function () { setType('movies'); });
+  $('#mcTabSeries').addEventListener('click', function () { setType('series'); });
+  ['#mcOnlyChanges', '#mcOnlySus', '#mcOnlyUnlocked'].forEach(function (s) { $(s).addEventListener('change', render); });
+  $('#mcFilter').addEventListener('input', render);
+  $('#mcRefresh').addEventListener('click', load);
+  $('#mcSelectAll').addEventListener('click', function () { visible().forEach(function (p) { selected[p.itemId] = true; }); render(); });
+  $('#mcSelectNone').addEventListener('click', function () { selected = {}; render(); });
 
   function bulkLock(locked) {
-    var ids = Object.keys(selected);
-    if (!ids.length) { Dashboard.alert('Select movies first.'); return; }
+    var ids = selectedIds();
+    if (!ids.length) return;
     api('POST', 'Lock', { itemIds: ids, locked: locked }).then(function (n) {
-      Dashboard.alert((locked ? 'Locked ' : 'Unlocked ') + n + ' movie(s).');
+      Dashboard.alert((locked ? 'Locked ' : 'Unlocked ') + noun(n) + (type === 'series' ? ' (with their episodes)' : '') + '.');
       return load();
     }).catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
   }
-  $('#moLockSel').addEventListener('click', function () { bulkLock(true); });
-  $('#moUnlockSel').addEventListener('click', function () { bulkLock(false); });
+  $('#mcLockSel').addEventListener('click', function () { bulkLock(true); });
+  $('#mcUnlockSel').addEventListener('click', function () { bulkLock(false); });
 
-  $('#moList').addEventListener('change', function (e) {
-    if (e.target.classList.contains('mo-sel')) {
-      var id = e.target.closest('.mo-card').getAttribute('data-id');
-      if (e.target.checked) selected[id] = true; else delete selected[id];
-      render();
-    }
-  });
-  $('#moList').addEventListener('input', function (e) {
-    var card = e.target.closest('.mo-card');
-    if (!card) return;
-    var id = card.getAttribute('data-id');
-    if (e.target.classList.contains('mo-title')) {
-      card.querySelector('.mo-save').style.display = e.target.value !== e.target.getAttribute('data-orig') ? '' : 'none';
-    }
-    if (e.target.classList.contains('mo-q')) search[id].q = e.target.value;
-    if (e.target.classList.contains('mo-y')) search[id].y = e.target.value;
-  });
-  $('#moList').addEventListener('submit', function (e) {
-    e.preventDefault();
-    runSearch(e.target.closest('.mo-card').getAttribute('data-id'));
-  });
-  function saveName(id, name) {
-    return api('POST', 'Name', { itemId: id, name: name }).then(load)
-      .catch(function (e) { Dashboard.alert('Could not save name: ' + e.message); });
-  }
-  $('#moList').addEventListener('keydown', function (e) {
-    if (e.target.classList.contains('mo-title') && e.key === 'Enter') saveName(e.target.closest('.mo-card').getAttribute('data-id'), e.target.value);
-  });
-  $('#moList').addEventListener('click', function (e) {
-    var card = e.target.closest('.mo-card');
-    if (!card) return;
-    var id = card.getAttribute('data-id'), p = planById(id);
-    if (e.target.closest('.mo-save')) saveName(id, card.querySelector('.mo-title').value);
-    else if (e.target.closest('.mo-reset')) saveName(id, '');
-    else if (e.target.closest('.mo-open-search')) openSearch(id);
-    else if (e.target.closest('.mo-close')) { delete search[id]; renderCard(id); }
-    else if (e.target.closest('.mo-use')) useResult(id, parseInt(e.target.closest('.mo-use').getAttribute('data-i'), 10));
-    else if (e.target.closest('.mo-toggle-lock')) {
-      api('POST', 'Lock', { itemIds: [id], locked: !p.locked }).then(load)
-        .catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
-    }
-  });
-
-  $('#moApply').addEventListener('click', function () {
-    var ids = Object.keys(selected).filter(function (id) { var p = planById(id); return p && p.ops.length; });
-    if (!ids.length) { Dashboard.alert('Select movies that have folder changes first.'); return; }
+  $('#mcBatchFolders').addEventListener('click', function () {
+    var ids = selectedIds().filter(function (id) { return planById(id).ops.length; });
+    if (!ids.length) { Dashboard.alert('None of the selected items have folder changes.'); return; }
     var nOps = ids.reduce(function (n, id) { return n + planById(id).ops.length; }, 0);
-    if (!confirm('Apply ' + nOps + ' folder/file change(s) to ' + ids.length + ' movie(s)? You can undo with "Undo last apply".')) return;
+    if (!confirm('Apply ' + nOps + ' folder/file change(s) to ' + noun(ids.length) + '?\nYou can undo with "Undo last folder change".')) return;
     var body = opts(); body.itemIds = ids;
-    $('#moSummary').textContent = 'Applying…';
+    $('#mcSummary').textContent = 'Applying…';
     api('POST', 'Apply', body).then(function (r) {
       selected = {};
-      Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') +
-        '\n\nA library scan has started.');
+      Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\nA library scan has started.');
       return load();
     }).catch(function (e) { Dashboard.alert('Apply failed: ' + e.message); load(); });
   });
 
-  $('#moUndo').addEventListener('click', function () {
-    if (!confirm('Undo the most recent apply? Files go back where they were and NFOs it created are removed.')) return;
+  $('#mcUndo').addEventListener('click', function () {
+    if (!confirm('Undo the most recent folder change? Files go back where they were and NFOs it created are removed.')) return;
     api('POST', 'Undo').then(function (r) {
       Dashboard.alert('Undone: ' + r.done + ' change(s).' + (r.errors.length ? '\n\n' + r.errors.join('\n') : ''));
       return load();
     }).catch(function (e) { Dashboard.alert('Undo failed: ' + e.message); });
   });
+
+  // ---------------------------------------------------------------- row events
+  function saveName(id, name) {
+    return api('POST', 'Name', { itemId: id, name: name }).then(load)
+      .catch(function (e) { Dashboard.alert('Could not save name: ' + e.message); });
+  }
+  $('#mcList').addEventListener('change', function (e) {
+    var rowEl = e.target.closest('.mc-row');
+    if (!rowEl) return;
+    var id = rowEl.getAttribute('data-id');
+    if (e.target.classList.contains('mc-sel')) {
+      if (e.target.checked) selected[id] = true; else delete selected[id];
+      rowEl.classList.toggle('mc-selected', e.target.checked);
+      summary();
+    } else if (e.target.classList.contains('mc-season')) {
+      var v = e.target.value.trim();
+      api('POST', 'Season', { itemId: id, season: v === '' ? null : parseInt(v, 10) })
+        .then(load).catch(function (err) { Dashboard.alert('Could not save season: ' + err.message); });
+    }
+  });
+  $('#mcList').addEventListener('input', function (e) {
+    if (e.target.classList.contains('mc-title-input')) {
+      e.target.closest('.mc-name').querySelector('.mc-save-name').style.display =
+        e.target.value !== e.target.getAttribute('data-orig') ? '' : 'none';
+    }
+  });
+  $('#mcList').addEventListener('keydown', function (e) {
+    if (e.target.classList.contains('mc-title-input') && e.key === 'Enter') saveName(e.target.closest('.mc-row').getAttribute('data-id'), e.target.value);
+  });
+  $('#mcList').addEventListener('click', function (e) {
+    var rowEl = e.target.closest('.mc-row');
+    if (!rowEl) return;
+    var id = rowEl.getAttribute('data-id'), p = planById(id);
+    if (e.target.closest('.mc-identify')) openIdentify(id);
+    else if (e.target.closest('.mc-lock')) {
+      api('POST', 'Lock', { itemIds: [id], locked: !p.locked }).then(function () { p.locked = !p.locked; renderRow(id); })
+        .catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+    }
+    else if (e.target.closest('.mc-folder-toggle')) { open[id] = !open[id]; renderRow(id); }
+    else if (e.target.closest('.mc-save-name')) saveName(id, rowEl.querySelector('.mc-title-input').value);
+    else if (e.target.closest('.mc-reset-name')) saveName(id, '');
+  });
+
+  page.addEventListener('pageshow', function () {
+    themeBackground();
+    stickyOffset();
+    syncTypeVisibility();
+    load();
+  });
+  window.addEventListener('resize', stickyOffset);
 })();
 </script>
 </div>

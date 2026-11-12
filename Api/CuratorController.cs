@@ -28,6 +28,14 @@ public class NameRequest
     [JsonPropertyName("name")] public string? Name { get; set; }
 }
 
+public class SeasonRequest
+{
+    [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Season for episodes Jellyfin couldn't place in a season; null resets to automatic.</summary>
+    [JsonPropertyName("season")] public int? Season { get; set; }
+}
+
 /// <summary>Admin-only API behind the Movie Curator dashboard page.</summary>
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
@@ -44,10 +52,15 @@ public class CuratorController : ControllerBase
         _service = new CuratorService(library, logger);
     }
 
-    /// <summary>Preview: what would change for every movie. Nothing is touched.</summary>
+    /// <summary>Preview: what would change for every movie (type=movies) or series (type=series). Nothing is touched.</summary>
     [HttpGet("Plan")]
-    public ActionResult<List<MoviePlan>> GetPlan([FromQuery] bool rename = true, [FromQuery] bool nfo = true, [FromQuery] bool lockNfo = true)
-        => _service.BuildPlan(new PlanOptions { Rename = rename, Nfo = nfo, LockNfo = lockNfo });
+    public ActionResult<List<ItemPlan>> GetPlan(
+        [FromQuery] string type = "movies",
+        [FromQuery] bool rename = true,
+        [FromQuery] bool episodes = false,
+        [FromQuery] bool nfo = true,
+        [FromQuery] bool lockNfo = true)
+        => _service.BuildPlan(new PlanOptions { Type = type, Rename = rename, Episodes = episodes, Nfo = nfo, LockNfo = lockNfo });
 
     /// <summary>Apply the plan for the selected movies, then start a library scan.</summary>
     [HttpPost("Apply")]
@@ -59,12 +72,26 @@ public class CuratorController : ControllerBase
     public async Task<ActionResult<ApplyResult>> Undo()
         => await _service.UndoLast(HttpContext.RequestAborted).ConfigureAwait(false);
 
-    /// <summary>Lock or unlock movies so library refreshes / "Refresh all metadata" leave them alone.</summary>
+    /// <summary>Lock or unlock movies/series (a series includes its seasons and episodes) so library refreshes / "Refresh all metadata" leave them alone.</summary>
     [HttpPost("Lock")]
     public async Task<ActionResult<int>> Lock([FromBody] LockRequest request, CancellationToken cancellationToken)
         => await _service.SetLocked(request.ItemIds, request.Locked, cancellationToken).ConfigureAwait(false);
 
-    /// <summary>Set (or clear) a custom folder name for one movie.</summary>
+    /// <summary>Set (or clear) the season used for a series' episodes that have no season in Jellyfin.</summary>
+    [HttpPost("Season")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult SetSeason([FromBody] SeasonRequest request)
+    {
+        if (!Guid.TryParse(request.ItemId, out var id) || _library.GetItemById(id) is not { } item)
+        {
+            return NotFound();
+        }
+
+        _service.SetSeasonOverride(item, request.Season);
+        return NoContent();
+    }
+
+    /// <summary>Set (or clear) a custom folder name for one movie or series.</summary>
     [HttpPost("Name")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult SetName([FromBody] NameRequest request)

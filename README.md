@@ -69,6 +69,32 @@ A display-title change shows in the preview as a 🏷 change. On Apply it rename
 
 You can also type a custom name on any movie (Enter to save); **Reset name** goes back to the template.
 
+## Series
+
+Switch to the **Series** tab. Default layout (all templates editable under **Naming**):
+
+```
+Nanatsu no Taizai/
+  Season 1 - <season title>/
+    1：The Seven Deadly Sins - 01.mkv
+  Season 2 - <season title>/
+    2：The Seven Deadly Sins - 01.mkv
+```
+
+- **Series level** (always): folder name, fix match (Jellyfin's series search), locked `tvshow.nfo`, and
+  **Lock (with episodes)** to lock the series together with all its seasons and episodes.
+- **Episodes** (turn on *Rename episodes into season folders*): episodes move into season folders and get renamed.
+  Only episodes Jellyfin has an episode number for are touched; the rest are listed and left alone.
+- **Merging:** folders in the same library that Jellyfin identified as the same show (e.g. `Grand Blue`,
+  `Grand Blue Season 2`, `Grand Blue Season 3`) are shown as one card and merged into one folder, each as its own season.
+- **Season numbers:** Jellyfin's season is used when it's 0 (specials) or 2+. When it says 1 or nothing — common for
+  anime kept one folder per season — the folder's own name wins (`Season 2`, `S2`, `2nd Season`, `第2期`, `第二季`, `II`),
+  or a number you type on the card.
+- **Safety:** if two season folders would end up with the same season number, or two files share a season+episode
+  number, that show is marked *season numbering conflict* and its episodes are not renamed. Fix the match or set the
+  season, then refresh.
+- Empty folders left behind are removed; undo recreates them.
+
 ## Build
 
 Requires the .NET 9 SDK.
