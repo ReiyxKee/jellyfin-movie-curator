@@ -82,6 +82,7 @@
       <span class="mc-sep"></span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchIdentify" title="Suggest a match for each selected item; review and apply"><span>Identify selected</span></button>
       <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcBatchFolders" title="Apply folder/file changes for the selected items"><span>Adjust folders</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcVerifySel" title="Confirm the current match of the selected items"><span>✓ Mark correct</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcLockSel"><span>Lock</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnlockSel"><span>Unlock</span></button>
       <span class="mc-sep"></span>
@@ -148,7 +149,7 @@
         <label><input type="checkbox" id="mcRename" checked> Rename folders &amp; files</label>
         <label><input type="checkbox" id="mcNfo" checked> Write NFO</label>
         <label><input type="checkbox" id="mcLockNfo" checked> Lock NFO</label>
-        <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying</label>
+        <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying / marking correct</label>
         <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
       </div>
 
@@ -289,6 +290,7 @@
     var tags = [];
     if (p.locked) tags.push('<span class="mc-tag ok">🔒 locked</span>');
     if (p.suspicious) tags.push('<span class="mc-tag warn">check match</span>');
+    if (p.verified) tags.push('<span class="mc-tag ok">✓ verified</span>');
     if (p.seasonConflict) tags.push('<span class="mc-tag warn">season numbering conflict</span>');
     if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
@@ -303,9 +305,11 @@
         '<div class="mc-meta">' + orig + esc(idText(p.providerIds)) + '</div>' +
         '<div class="mc-desc">' + (p.overview ? esc(p.overview) : '<i>No description.</i>') + '</div>' +
         '<div class="mc-actions">' +
+          (p.suspicious ? '<button is="emby-button" type="button" class="raised button-submit mc-btn mc-verify" title="The current match is correct"><span>✓ Looks right</span></button>' : '') +
           '<button is="emby-button" type="button" class="raised mc-btn mc-lock"><span>' + (p.locked ? 'Unlock' : 'Lock') + '</span></button>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-identify"><span>Re-identify</span></button>' +
           '<a is="emby-linkbutton" class="raised emby-button mc-btn" href="' + detailsUrl + '">Open</a>' +
+          (p.verified ? '<a href="#" class="mc-unverify mc-meta" style="margin-left:.3em" title="Remove the ✓ verified mark">Unmark</a>' : '') +
           '<span class="mc-folder-toggle">📁 ' + (nChanges ? nChanges + ' folder change' + (nChanges > 1 ? 's' : '') : 'folder tidy') +
             (nWarn ? ' · <span class="mc-warn">' + nWarn + ' note' + (nWarn > 1 ? 's' : '') + '</span>' : '') + (open[p.itemId] ? ' ▾' : ' ▸') + '</span>' +
         '</div>' +
@@ -330,7 +334,7 @@
     var n = selectedIds().length;
     $('#mcSummary').textContent = noun(plans.length) + ' · ' + c.sus + ' to check · ' + c.lock + ' locked · ' + c.ops + ' with folder changes · ' +
       (n ? n + ' selected' : 'none selected');
-    ['#mcBatchIdentify', '#mcBatchFolders', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
+    ['#mcBatchIdentify', '#mcBatchFolders', '#mcVerifySel', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
   }
 
   function render() {
@@ -769,6 +773,19 @@
   $('#mcSelectAll').addEventListener('click', function () { visible().forEach(function (p) { selected[p.itemId] = true; }); render(); });
   $('#mcSelectNone').addEventListener('click', function () { selected = {}; render(); });
 
+  /** Confirm (or un-confirm) the current match; also locks when "Lock after identifying / marking correct" is on. */
+  function verify(ids, verified) {
+    var lock = verified && $('#mcLockAfter').checked;
+    return api('POST', 'Verify', { itemIds: ids, verified: verified })
+      .then(function () { return lock ? api('POST', 'Lock', { itemIds: ids, locked: true }) : null; });
+  }
+  $('#mcVerifySel').addEventListener('click', function () {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    verify(ids, true).then(function () { selected = {}; return load(); })
+      .catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
+  });
+
   function bulkLock(locked) {
     var ids = selectedIds();
     if (!ids.length) return;
@@ -835,6 +852,13 @@
     if (!rowEl) return;
     var id = rowEl.getAttribute('data-id'), p = planById(id);
     if (e.target.closest('.mc-identify')) openIdentify(id);
+    else if (e.target.closest('.mc-verify')) {
+      verify([id], true).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+    }
+    else if (e.target.closest('.mc-unverify')) {
+      e.preventDefault();
+      verify([id], false).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+    }
     else if (e.target.closest('.mc-lock')) {
       api('POST', 'Lock', { itemIds: [id], locked: !p.locked }).then(function () { p.locked = !p.locked; renderRow(id); })
         .catch(function (err) { Dashboard.alert('Failed: ' + err.message); });

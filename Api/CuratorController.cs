@@ -20,6 +20,13 @@ public class LockRequest
     [JsonPropertyName("locked")] public bool Locked { get; set; } = true;
 }
 
+public class VerifyRequest
+{
+    [JsonPropertyName("itemIds")] public List<string> ItemIds { get; set; } = new();
+
+    [JsonPropertyName("verified")] public bool Verified { get; set; } = true;
+}
+
 public class NameRequest
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
@@ -76,6 +83,10 @@ public class CuratorController : ControllerBase
     [HttpPost("Lock")]
     public async Task<ActionResult<int>> Lock([FromBody] LockRequest request, CancellationToken cancellationToken)
         => await _service.SetLocked(request.ItemIds, request.Locked, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Mark the current identification of items as correct ("Looks right"), or unmark it.</summary>
+    [HttpPost("Verify")]
+    public ActionResult<int> Verify([FromBody] VerifyRequest request) => _service.SetVerified(request.ItemIds, request.Verified);
 
     /// <summary>Set (or clear) the season used for a series' episodes that have no season in Jellyfin.</summary>
     [HttpPost("Season")]

@@ -86,6 +86,9 @@ public class ItemPlan
 
     [JsonPropertyName("suspicious")] public bool Suspicious { get; set; }
 
+    /// <summary>The user confirmed this identification ("Looks right"); it's no longer flagged as suspicious.</summary>
+    [JsonPropertyName("verified")] public bool Verified { get; set; }
+
     /// <summary>Jellyfin's "Lock this item" flag: refreshes won't change its metadata.</summary>
     [JsonPropertyName("locked")] public bool Locked { get; set; }
 
@@ -281,6 +284,45 @@ public class CuratorService
         }
 
         yield return "path:" + item.Path;
+    }
+
+    // ------------------------------------------------------------------ "looks right" marks
+    /// <summary>Identity of the current match: type + provider IDs (or the path when there are none).</summary>
+    private static string Signature(BaseItem item)
+    {
+        var ids = item.ProviderIds
+            .Where(kv => !string.IsNullOrEmpty(kv.Value) && kv.Key != "TmdbCollection")
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => kv.Key + "=" + kv.Value)
+            .ToList();
+        return (item is Series ? "series|" : "movie|") + (ids.Count > 0 ? string.Join("|", ids) : "path=" + item.Path);
+    }
+
+    private static bool IsVerified(BaseItem item) => Config.Verified.Contains(Signature(item));
+
+    /// <summary>Mark (or unmark) the current identification of these items as correct.</summary>
+    public int SetVerified(IEnumerable<string> itemIds, bool verified)
+    {
+        var n = 0;
+        foreach (var id in itemIds)
+        {
+            if (!Guid.TryParse(id, out var guid) || _library.GetItemById(guid) is not { } item)
+            {
+                continue;
+            }
+
+            var sig = Signature(item);
+            Config.Verified.RemoveAll(v => v == sig);
+            if (verified)
+            {
+                Config.Verified.Add(sig);
+            }
+
+            n++;
+        }
+
+        Plugin.Instance!.SaveConfiguration();
+        return n;
     }
 
     // ------------------------------------------------------------------ templates
@@ -656,7 +698,8 @@ public class CuratorService
             FileName = names.File,
             TitleSource = names.Source,
             Layout = layout,
-            Suspicious = !(ids.ContainsKey("Tmdb") || ids.ContainsKey("Imdb")) || AnimeProviders.Any(ids.ContainsKey),
+            Verified = IsVerified(m),
+            Suspicious = !IsVerified(m) && (!(ids.ContainsKey("Tmdb") || ids.ContainsKey("Imdb")) || AnimeProviders.Any(ids.ContainsKey)),
             Locked = m.IsLocked,
         };
         (p.GuessName, p.GuessYear) = layout == "single"
@@ -879,7 +922,8 @@ public class CuratorService
             FileName = names.Folder,
             TitleSource = names.Source,
             Layout = "series",
-            Suspicious = !SeriesIdProviders.Any(ids.ContainsKey),
+            Verified = IsVerified(s),
+            Suspicious = !IsVerified(s) && !SeriesIdProviders.Any(ids.ContainsKey),
             Locked = s.IsLocked,
             EpisodeCount = allEpisodes.Count,
             MergedFolders = others.Select(o => o.Path.TrimEnd('/')).ToList(),

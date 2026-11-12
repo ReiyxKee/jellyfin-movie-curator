@@ -46,6 +46,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Regex find/replace rules applied, in order, to every generated name.</summary>
     public List<RegexRule> CleanupRules { get; set; } = new();
 
+    /// <summary>
+    /// Identifications a user confirmed with "Looks right". Each entry is the item's identity at that moment
+    /// (type + provider IDs), so re-identifying it to something else clears the mark automatically.
+    /// </summary>
+    public List<string> Verified { get; set; } = new();
+
     /// <summary>Names typed by hand in the UI. Key is "tmdb:22", "tv-tvdb:81189", "imdb:tt..." or "path:/media/...".</summary>
     public List<NameOverride> Overrides { get; set; } = new();
 }
