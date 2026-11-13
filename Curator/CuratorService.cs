@@ -118,6 +118,9 @@ public class ItemPlan
 
     [JsonPropertyName("seasonSource")] public string? SeasonSource { get; set; }
 
+    /// <summary>Series: Jellyfin's seasons (of every folder in a group), in season order.</summary>
+    [JsonPropertyName("seasons")] public List<SeasonCard> Seasons { get; set; } = new();
+
     /// <summary>Series: its season subfolders, with the season number each one becomes.</summary>
     [JsonPropertyName("seasonFolders")] public List<SeasonFolderInfo> SeasonFolders { get; set; } = new();
 
@@ -177,6 +180,31 @@ public class GroupMember
     [JsonPropertyName("kind")] public string Kind { get; set; } = "series";
 }
 
+/// <summary>A Jellyfin season of a show: number, title, artwork, episode count.</summary>
+public class SeasonCard
+{
+    [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>The show (folder) this season belongs to (grouped shows have several).</summary>
+    [JsonPropertyName("seriesItemId")] public string SeriesItemId { get; set; } = string.Empty;
+
+    [JsonPropertyName("index")] public int? Index { get; set; }
+
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("overview")] public string? Overview { get; set; }
+
+    [JsonPropertyName("episodeCount")] public int EpisodeCount { get; set; }
+
+    /// <summary>Season folder on disk (empty when Jellyfin made the season from episode numbers only).</summary>
+    [JsonPropertyName("path")] public string? Path { get; set; }
+
+    [JsonPropertyName("hasImage")] public bool HasImage { get; set; }
+
+    /// <summary>The title was set by hand (Name field locked).</summary>
+    [JsonPropertyName("nameLocked")] public bool NameLocked { get; set; }
+}
+
 /// <summary>A subfolder of a series folder (usually one season).</summary>
 public class SeasonFolderInfo
 {
@@ -220,6 +248,20 @@ public class HistoryEntry
     [JsonPropertyName("items")] public List<string> Items { get; set; } = new();
 
     [JsonPropertyName("ops")] public List<PlanOp> Ops { get; set; } = new();
+}
+
+/// <summary>Library scan state for the "Scan library" button.</summary>
+public class ScanStatus
+{
+    /// <summary>Folder changes made since the last scan (when scanning after each change is off).</summary>
+    [JsonPropertyName("pending")] public int Pending { get; set; }
+
+    [JsonPropertyName("scanning")] public bool Scanning { get; set; }
+
+    /// <summary>Scan automatically after each folder change.</summary>
+    [JsonPropertyName("auto")] public bool Auto { get; set; }
+
+    [JsonPropertyName("lastScan")] public string? LastScan { get; set; }
 }
 
 public class ApplyResult
@@ -383,18 +425,40 @@ public class CuratorService
     /// A container folder holds no videos itself, only 2+ subfolders with videos whose names look like separate
     /// shows (not "Season 1", "S2", "Specials", "OVA"…). Returns those subfolders, or null.
     /// </summary>
+    private static int VideoCount(string dir) => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(IsVideo);
+
+    /// <summary>Each season is its own show (default) instead of season folders inside one show.</summary>
+    private static bool Flat => !string.Equals(Config.SeriesLayout, "nested", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Subfolders that belong to a show but are never a show of their own.</summary>
+    private static readonly Regex ExtrasLike = new(
+        @"^(extras?|bonus|nced|ncop|nc|menu|bd extras|bluray extras|featurettes|trailers|other|subs?|subtitles|scans|cds?)$",
+        RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Subfolders to move out as separate shows, or null. Nested layout: a folder with no videos of its own whose 2+
+    /// subfolders look like separate shows (not "Season 1", "S2", "Specials"…). Flat layout: any 2+ video subfolders
+    /// (seasons included) except extras, since every season is its own show.
+    /// </summary>
     private static List<string>? ContainerChildren(string dir)
     {
-        if (Directory.EnumerateFiles(dir).Any(IsVideo))
+        var kids = Directory.GetDirectories(dir)
+            .Where(d => !IsJunk(d) && HasVideosBelow(d) && !ExtrasLike.IsMatch(System.IO.Path.GetFileName(d).Trim()))
+            .OrderBy(d => d, StringComparer.Ordinal)
+            .ToList();
+        if (kids.Count < 2)
         {
             return null;
         }
 
-        var kids = Directory.GetDirectories(dir)
-            .Where(d => !IsJunk(d) && HasVideosBelow(d))
-            .OrderBy(d => d, StringComparer.Ordinal)
-            .ToList();
-        if (kids.Count < 2 || kids.Any(k => SeasonLike.IsMatch(System.IO.Path.GetFileName(k).Trim())))
+        if (Flat)
+        {
+            // a season / show folder holds several episodes; one-video folders (e.g. "S01 E01/") are episode folders
+            var shows = kids.Where(k => VideoCount(k) >= 2).ToList();
+            return shows.Count >= 2 ? shows : null;
+        }
+
+        if (Directory.EnumerateFiles(dir).Any(IsVideo) || kids.Any(k => SeasonLike.IsMatch(System.IO.Path.GetFileName(k).Trim())))
         {
             return null;
         }
@@ -1021,6 +1085,11 @@ public class CuratorService
 
     private static string IdentityKey(Series s)
     {
+        if (Flat)
+        {
+            return "id:" + s.Id.ToString("N"); // every folder is its own show
+        }
+
         if (ManualGroup(s) is { } manual)
         {
             return "manual:" + manual.Id;
@@ -1059,6 +1128,15 @@ public class CuratorService
             .OrderBy(s => s.Path, StringComparer.Ordinal)
             .ToList();
 
+        var seasonsBySeries = _library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = new[] { BaseItemKind.Season },
+                Recursive = true,
+            })
+            .OfType<Season>()
+            .GroupBy(s => s.SeriesId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         var episodesBySeries = _library.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
@@ -1082,6 +1160,7 @@ public class CuratorService
             try
             {
                 var plan = PlanSeries(members, episodesBySeries, opt, ctx, moviesRoot);
+                plan.Seasons = SeasonCards(members, seasonsBySeries, episodesBySeries);
                 plan.Root = RootOf(plan.Path, roots);
                 plans.Add(plan);
             }
@@ -1092,6 +1171,39 @@ public class CuratorService
         }
 
         return plans;
+    }
+
+    /// <summary>Jellyfin's season entries for these show folders, with episode counts and artwork info.</summary>
+    private static List<SeasonCard> SeasonCards(List<Series> members, Dictionary<Guid, List<Season>> seasonsBySeries, Dictionary<Guid, List<Episode>> episodesBySeries)
+    {
+        var cards = new List<SeasonCard>();
+        foreach (var m in members)
+        {
+            var eps = episodesBySeries.GetValueOrDefault(m.Id) ?? new List<Episode>();
+            foreach (var season in seasonsBySeries.GetValueOrDefault(m.Id) ?? new List<Season>())
+            {
+                var count = eps.Count(e => e.SeasonId == season.Id);
+                if (count == 0)
+                {
+                    continue; // no episode files: a "missing season" placeholder or an empty leftover
+                }
+
+                cards.Add(new SeasonCard
+                {
+                    ItemId = season.Id.ToString("N"),
+                    SeriesItemId = m.Id.ToString("N"),
+                    Index = season.IndexNumber,
+                    Name = season.Name ?? string.Empty,
+                    Overview = season.Overview,
+                    EpisodeCount = count,
+                    Path = string.IsNullOrEmpty(season.Path) ? null : season.Path.TrimEnd('/'),
+                    HasImage = season.HasImage(ImageType.Primary),
+                    NameLocked = season.LockedFields.Contains(MetadataField.Name),
+                });
+            }
+        }
+
+        return cards.OrderBy(c => c.Index ?? int.MaxValue).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
     }
 
     private static ItemPlan PlanSeries(List<Series> members, Dictionary<Guid, List<Episode>> episodesBySeries, PlanOptions opt, Ctx ctx, string? moviesRoot)
@@ -1220,7 +1332,10 @@ public class CuratorService
             {
                 var inSub = rawEps.Where(e => IsUnder(e.Path, sub)).ToList();
                 var fs = FolderSeason(sub, inSub);
-                var action = FolderRuleFor(sub)?.Action == "show" ? "show" : "season";
+                var rule = FolderRuleFor(sub);
+                var action = rule?.Action == "show"
+                    || (Flat && rule == null && !ExtrasLike.IsMatch(System.IO.Path.GetFileName(sub).Trim()) && VideoCount(sub) >= 2)
+                    ? "show" : "season";
                 subSeasons[sub] = fs;
                 p.SeasonFolders.Add(new SeasonFolderInfo
                 {
@@ -1332,12 +1447,12 @@ public class CuratorService
 
     private static void PlanEpisodes(ItemPlan p, Ctx ctx, Series s, string dir, List<SeasonSource> sources, string seriesFolder, bool renameFiles)
     {
-        var seasonTpl = Config.SeasonFolderTemplate ?? DefaultSeasonFolder; // set to empty = episodes directly in the series folder
+        var seasonTpl = Flat ? string.Empty : Config.SeasonFolderTemplate ?? DefaultSeasonFolder; // empty = episodes directly in the show folder
         if (string.IsNullOrWhiteSpace(seasonTpl) && sources.Count > 1)
         {
             seasonTpl = "Season {season}"; // merged folders always need a season folder each
         }
-        var episodeTpl = Or(Config.EpisodeTemplate, DefaultEpisodeFile);
+        var episodeTpl = Flat ? Or(Config.FlatEpisodeTemplate, "{title} - {episode:00}") : Or(Config.EpisodeTemplate, DefaultEpisodeFile);
         var all = sources.SelectMany(x => x.Episodes.Select(e => (x.Dir, e.Episode, e.Season))).ToList();
         var numbered = all.Where(x => x.Episode.IndexNumber.HasValue && IsUnder(x.Episode.Path, x.Dir)).ToList();
         p.EpisodesSkipped = all.Count - numbered.Count;
@@ -1715,6 +1830,31 @@ public class CuratorService
     }
 
     /// <summary>Set the title Jellyfin shows and lock (or unlock) the Name field so refreshes keep it.</summary>
+    /// <summary>
+    /// Set a season's title (locked, so refreshes keep it). An empty name unlocks it again so the metadata source's
+    /// title comes back on the next refresh.
+    /// </summary>
+    public async Task<bool> SetSeasonName(string itemId, string? name, CancellationToken ct)
+    {
+        if (!Guid.TryParse(itemId, out var id) || _library.GetItemById(id) is not Season season)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            season.LockedFields = season.LockedFields.Where(f => f != MetadataField.Name).ToArray();
+            await season.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await SetDisplayName(itemId, name.Trim(), true, ct).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation("Curator: season {Id} title set to {Name}", itemId, string.IsNullOrWhiteSpace(name) ? "(automatic)" : name);
+        return true;
+    }
+
     private async Task SetDisplayName(string? itemId, string name, bool lockName, CancellationToken ct)
     {
         if (!Guid.TryParse(itemId, out var id) || _library.GetItemById(id) is not { } item)
@@ -1793,7 +1933,7 @@ public class CuratorService
             PruneHistory();
             result.Log = path;
             _logger.LogInformation("Curator: applied {Count} changes, log {Log}", log.Count, path);
-            QueueScan();
+            ScanOrDefer(log.Count);
         }
 
         return result;
@@ -1866,7 +2006,7 @@ public class CuratorService
         var lastN = 0;
         var result = await UndoLog(last, ct, text => report?.Invoke(++lastN, lastTotal, text)).ConfigureAwait(false);
         PruneHistory();
-        QueueScan();
+        ScanOrDefer(result.Done);
         return result;
     }
 
@@ -1903,7 +2043,7 @@ public class CuratorService
         total.Log = string.Join(", ", logs.Select(LogId));
         _logger.LogInformation("Curator: rewound {Count} folder change(s) back to before {Id}", logs.Count, id);
         PruneHistory();
-        QueueScan();
+        ScanOrDefer(total.Done);
         return total;
     }
 
@@ -1997,8 +2137,48 @@ public class CuratorService
         }
     }
 
-    private void QueueScan()
+    // ------------------------------------------------------------------ library scan (automatic or on demand)
+    private static int _pendingChanges;
+    private static volatile bool _scanning;
+    private static DateTime? _lastScan;
+
+    public static ScanStatus GetScanStatus() => new()
     {
+        Pending = _pendingChanges,
+        Scanning = _scanning,
+        Auto = Config.ScanAfterChanges,
+        LastScan = _lastScan?.ToString("o", CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>After folder changes: scan now, or (when automatic scanning is off) remember them for "Scan library".</summary>
+    private void ScanOrDefer(int changes)
+    {
+        if (changes <= 0)
+        {
+            return;
+        }
+
+        if (Config.ScanAfterChanges)
+        {
+            StartScan();
+        }
+        else
+        {
+            var waiting = Interlocked.Add(ref _pendingChanges, changes);
+            _logger.LogInformation("Curator: {Count} folder change(s) waiting for a library scan", waiting);
+        }
+    }
+
+    /// <summary>Scan all libraries now (one scan at a time). Returns false when a scan is already running.</summary>
+    public bool StartScan()
+    {
+        if (_scanning)
+        {
+            return false;
+        }
+
+        _scanning = true;
+        Interlocked.Exchange(ref _pendingChanges, 0);
         _ = Task.Run(async () =>
         {
             try
@@ -2009,6 +2189,12 @@ public class CuratorService
             {
                 _logger.LogError(ex, "Curator: library scan failed");
             }
+            finally
+            {
+                _scanning = false;
+                _lastScan = DateTime.UtcNow;
+            }
         });
+        return true;
     }
 }

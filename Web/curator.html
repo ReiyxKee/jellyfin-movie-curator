@@ -57,6 +57,11 @@
   #MovieCuratorPage .mc-filters .mc-sources-list h4 { margin: .4em 0 .15em; font-size: .75em; text-transform: uppercase; opacity: .6; letter-spacing: .04em; }
   #MovieCuratorPage .mc-icon { font-size: 1.1em; line-height: 1; padding: .3em .55em; }
   #MovieCuratorPage .mc-push { margin-left: auto; }
+  #MovieCuratorPage .mc-seasons { display: flex; gap: .6em; overflow-x: auto; padding: .5em .1em .3em; scroll-snap-type: x proximity; }
+  #MovieCuratorPage .mc-season { flex: 0 0 112px; scroll-snap-align: start; font-size: .78em; display: flex; flex-direction: column; gap: .15em; }
+  #MovieCuratorPage .mc-season img { width: 112px; height: 168px; object-fit: cover; border-radius: 4px; background: var(--mc-soft); }
+  #MovieCuratorPage .mc-season .mc-season-name { font-weight: 600; overflow-wrap: anywhere; line-height: 1.2; }
+  #MovieCuratorPage .mc-season .mc-season-edit { cursor: pointer; opacity: .7; margin-left: .25em; }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
   #MovieCuratorPage .mc-member { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
@@ -136,6 +141,7 @@
       <span class="mc-sep"></span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo" title="Folder change history: undo or rewind"><span>🕘 History / undo</span></button>
 
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcScan" title="Scan the libraries so Jellyfin picks up moved folders"><span>⟳ Scan library</span></button>
       <button is="emby-button" type="button" class="raised mc-btn mc-icon mc-push" id="mcRefresh" title="Refresh" aria-label="Refresh"><span aria-hidden="true">↻</span></button>
       <button is="emby-button" type="button" class="raised mc-btn mc-icon" id="mcOpenNaming" title="Naming &amp; options" aria-label="Naming &amp; options"><span aria-hidden="true">⚙</span></button>
     </div>
@@ -240,8 +246,17 @@
         <label><input type="checkbox" id="mcLockNfo" checked> Lock NFO</label>
         <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying / marking correct</label>
         <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
-        <label title="Movies in 'Rush Hour 1-3/' and shows inside 'Fate Series/' each get their own top-level folder">
-          <input type="checkbox" id="mcFlatten" checked> Flatten collection folders</label>
+        <label class="mc-movies-only" title="Movies inside collection folders like 'Rush Hour 1-3/' each get their own top-level folder">
+          <input type="checkbox" id="mcFlatten" checked> Move movies out of collection folders</label>
+        <label class="mc-series-only" title="Folders holding several shows or seasons (e.g. 'Fate Series/', or 'Sword Art Online/' with each season in a subfolder) are split: each one gets its own top-level folder">
+          <input type="checkbox" id="mcFlattenSeries" checked> Split folders that hold several shows / seasons</label>
+        <label class="mc-series-only" title="Flat: every season is its own show (good for AniList / AniDB). Nested: seasons inside one show folder (good for TMDB / TVDB).">
+          Series layout <select class="mc-text" id="mcLayout">
+            <option value="flat">Each season as its own show</option>
+            <option value="nested">Seasons inside one show</option>
+          </select></label>
+        <label title="Off: folder changes wait until you press 'Scan library' (moved items disappear from Jellyfin until then)">
+          <input type="checkbox" id="mcAutoScan" checked> Scan the library after each folder change</label>
       </div>
       <div class="mc-bar">
         <label title="How many folder changes can be undone with 'Undo last folder change'. Older ones are forgotten. -1 = keep all.">
@@ -260,8 +275,9 @@
       </div>
       <div class="mc-series-only">
         <div class="mc-bar"><label style="flex:1">Series folder&nbsp;<input class="mc-text" id="mcTplSeries" style="flex:1" placeholder="{originalTitle}"></label></div>
-        <div class="mc-bar"><label style="flex:1">Season folder&nbsp;<input class="mc-text" id="mcTplSeason" style="flex:1" placeholder="(empty = no season folders)"></label></div>
-        <div class="mc-bar"><label style="flex:1">Episode file&nbsp;<input class="mc-text" id="mcTplEpisode" style="flex:1" placeholder="{season}:{title} - {episode:00}"></label></div>
+        <div class="mc-bar mc-nested-only"><label style="flex:1">Season folder&nbsp;<input class="mc-text" id="mcTplSeason" style="flex:1" placeholder="(empty = no season folders)"></label></div>
+        <div class="mc-bar mc-flat-only"><label style="flex:1">Episode file (flat)&nbsp;<input class="mc-text" id="mcTplFlatEpisode" style="flex:1" placeholder="{title} - {episode:00}"></label></div>
+        <div class="mc-bar mc-nested-only"><label style="flex:1">Episode file&nbsp;<input class="mc-text" id="mcTplEpisode" style="flex:1" placeholder="{season}:{title} - {episode:00}"></label></div>
         <div class="mc-bar"><label style="flex:1">Display title&nbsp;<input class="mc-text" id="mcTplSeriesDisplay" style="flex:1" placeholder="(leave Jellyfin's title unchanged)"></label></div>
       </div>
       <label class="mc-meta" style="display:block;margin-top:.6em">Regex clean-up rules, one per line: <code>pattern =&gt; replacement</code></label>
@@ -338,7 +354,7 @@
   function opts() {
     return {
       type: type, rename: $('#mcRename').checked, episodes: type === 'series' && $('#mcEpisodes').checked,
-      flatten: $('#mcFlatten').checked,
+      flatten: type === 'series' ? $('#mcFlattenSeries').checked : $('#mcFlatten').checked,
       nfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
     };
   }
@@ -447,6 +463,26 @@
     }).join('') + '</div>';
   }
 
+  /** Jellyfin's seasons of a show (all folders of a group): poster, number, title, episodes, folder. */
+  function seasonsBlock(p) {
+    var list = p.seasons || [];
+    if (p.kind !== 'series' || list.length < 2) return '';
+    return '<div class="mc-group"><div class="mc-group-head">📚 <b>' + list.length + ' seasons</b>' +
+      '<span class="mc-meta">titles and artwork from Jellyfin · ✎ renames a season (also used in season folder names)</span></div>' +
+      '<div class="mc-seasons">' + list.map(function (s) {
+        var img = s.hasImage ? poster(s.itemId, 260) : poster(s.seriesItemId, 260);
+        var label = s.index != null ? (s.index === 0 ? 'Specials' : 'Season ' + s.index) : 'No number';
+        return '<div class="mc-season" data-season="' + s.itemId + '" title="' + esc(s.overview || '') + '">' +
+          '<img loading="lazy" alt="" src="' + esc(img) + '" onerror="this.style.visibility=\'hidden\'">' +
+          '<span class="mc-tag' + (s.index == null ? ' warn' : '') + '" style="align-self:flex-start;margin:0">' + esc(label) + '</span>' +
+          '<span class="mc-season-name">' + esc(s.name) + (s.nameLocked ? ' 🔒' : '') +
+            '<a class="mc-season-edit" title="Rename this season">✎</a></span>' +
+          '<span class="mc-meta">' + s.episodeCount + ' episode(s)</span>' +
+          (s.path ? '<span class="mc-where" style="font-size:.9em">📁 ' + esc(short(s.path, p.root)) + '/</span>' : '') +
+        '</div>';
+      }).join('') + '</div></div>';
+  }
+
   var SOURCE_TEXT = { custom: 'set by you', name: 'from folder name', jellyfin: 'from Jellyfin', unset: 'unknown' };
   function seasonFoldersBlock(p) {
     if (p.kind !== 'series') return '';
@@ -492,6 +528,7 @@
     if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
     if (p.detached) tags.push('<span class="mc-tag">detached</span>');
+    if (p.kind === 'series' && (p.seasons || []).length > 1) tags.push('<span class="mc-tag">📚 ' + p.seasons.length + ' seasons</span>');
     var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
     var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
     var nChanges = p.ops.length, nWarn = p.warnings.length;
@@ -514,6 +551,7 @@
             (nWarn ? ' · <span class="mc-warn">' + nWarn + ' note' + (nWarn > 1 ? 's' : '') + '</span>' : '') + (open[p.itemId] ? ' ▾' : ' ▸') + '</span>' +
         '</div>' +
         groupBlock(p) +
+        seasonsBlock(p) +
         seasonFoldersBlock(p) +
         (open[p.itemId] ? folderPanel(p) : '') +
       '</div></div>';
@@ -522,6 +560,8 @@
   // ---------------------------------------------------------------- filters (different per tab, combined with AND)
   function ids(p) { return p.providerIds || {}; }
   function depth(p) { return short(p.path, p.root).split('/').length; }
+  function movesUp(p) { return (p.ops || []).some(function (o) { return o.note === 'flatten'; }); }
+  var NESTED = { group: 'Folders', key: 'nested', label: '📤 Nested (will move up)', test: movesUp };
   var COMMON_STATE = [
     { group: 'State', key: 'changes', label: 'With folder changes', test: function (p) { return p.ops.length > 0; } },
     { group: 'State', key: 'locked', label: 'Locked', not: 'unlocked', test: function (p) { return p.locked; } },
@@ -537,13 +577,14 @@
       { group: 'Match', key: 'anime', label: 'Matched by an anime source', test: function (p) { return !!(ids(p).AniList || ids(p).AniDB || ids(p).AniSearch); } },
       { group: 'Match', key: 'noyear', label: 'Missing year', test: function (p) { return !p.year; } },
       { group: 'Location', key: 'loose', label: 'Loose file in the library root', test: function (p) { return p.layout === 'loose'; } },
-      { group: 'Location', key: 'collection', label: 'Inside a collection folder', test: function (p) { return p.layout === 'shared' || depth(p) > 2; } }
+      { group: 'Location', key: 'collection', label: 'Inside a collection folder', test: function (p) { return p.layout === 'shared' || depth(p) > 2; } },
+      { group: 'Location', key: 'nested', label: NESTED.label, test: NESTED.test }
     ].concat(COMMON_STATE),
     series: [
       { group: 'Match', key: 'check', label: 'Needs checking', test: function (p) { return p.suspicious || p.seasonConflict; } },
       { group: 'Match', key: 'noids', label: 'No IDs at all', test: function (p) { return !Object.keys(ids(p)).length; } },
       { group: 'Match', key: 'conflict', label: 'Season numbering conflict', test: function (p) { return p.seasonConflict; } },
-      { group: 'Folders', key: 'container', label: '📦 Shows inside (container)', test: function (p) { return (p.containerShows || []).length > 0; } },
+      NESTED,
       { group: 'Folders', key: 'grouped', label: '🔗 Several folders (grouped)', test: function (p) { return (p.members || []).length > 1; } },
       { group: 'Folders', key: 'detached', label: 'Detached', test: function (p) { return p.detached; } },
       { group: 'Folders', key: 'unnumbered', label: 'Episodes without numbers', test: function (p) { return p.episodesSkipped > 0; } },
@@ -616,9 +657,10 @@
     box.disabled = !shown.length;
     $('#mcSelectAllLabel').textContent = 'Select all' + (shown.length !== plans.length ? ' shown (' + shown.length + ')' : '');
     $('#mcSummary').textContent = noun(plans.length) + ' · ' + c.sus + ' to check · ' + c.lock + ' locked · ' + c.ops + ' with folder changes · ' +
-      (n ? n + ' selected' : 'none selected');
+      (n ? n + ' selected' : 'none selected') +
+      (scan && scan.pending ? ' · ' + scan.pending + ' folder change(s) waiting for a library scan (moved items reappear after scanning)' : '');
     ['#mcBatchIdentify', '#mcBatchFolders', '#mcVerifySel', '#mcLockSel', '#mcUnlockSel'].forEach(function (s) { $(s).disabled = !n; });
-    $('#mcCombine').disabled = n < 2;
+    $('#mcCombine').disabled = layout === 'flat' ? n < 1 : n < 2;
   }
 
   function render() {
@@ -777,6 +819,68 @@
     openBatchForJob(id, kind);
   }
 
+  // ---------------------------------------------------------------- series layout (flat = each season its own show)
+  var layout = 'flat';
+  function syncLayout() {
+    $$('.mc-flat-only').forEach(function (el) { el.style.display = layout === 'flat' ? '' : 'none'; });
+    $$('.mc-nested-only').forEach(function (el) { el.style.display = layout === 'nested' ? '' : 'none'; });
+    var b = $('#mcCombine');
+    if (b) {
+      b.querySelector('span').textContent = layout === 'flat' ? '📚 Add to collection' : '🔗 Combine selected';
+      b.title = layout === 'flat' ? 'Put the selected shows (e.g. the seasons of one franchise) into a Jellyfin collection'
+        : 'Treat the selected series folders as one show (merged as seasons)';
+    }
+  }
+  function loadLayout() {
+    return ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
+      layout = cfg.SeriesLayout === 'nested' ? 'nested' : 'flat';
+      syncLayout();
+    }).catch(function () {});
+  }
+  $('#mcLayout').addEventListener('change', function () { layout = $('#mcLayout').value; syncLayout(); });
+  /** Longest common start of the titles, as a collection name suggestion ("Sword Art Online II", "Sword Art Online - …" -> "Sword Art Online"). */
+  function commonTitle(titles) {
+    if (!titles.length) return '';
+    var a = titles[0];
+    for (var i = 1; i < titles.length; i++) {
+      var j = 0;
+      while (j < a.length && j < titles[i].length && a[j].toLowerCase() === titles[i][j].toLowerCase()) j++;
+      a = a.slice(0, j);
+    }
+    a = a.replace(/[\s:：\-–—(\/／]+$/, '').trim();
+    return a.length >= 3 ? a : titles[0];
+  }
+
+  // ---------------------------------------------------------------- library scan (automatic, or by hand after a session)
+  var scan = { pending: 0, scanning: false, auto: true };
+  var scanTimer = null;
+  function renderScan() {
+    var b = $('#mcScan');
+    b.disabled = scan.scanning;
+    b.classList.toggle('button-submit', scan.pending > 0 && !scan.scanning);
+    b.querySelector('span').textContent = scan.scanning ? '⟳ Scanning…'
+      : '⟳ Scan library' + (scan.pending ? ' (' + scan.pending + ' waiting)' : '');
+  }
+  function scanNote() {
+    return scan.auto ? 'A library scan has started.'
+      : 'Not scanned yet (automatic scanning is off): press ⟳ Scan library when you are done.';
+  }
+  function loadScan() {
+    clearTimeout(scanTimer);
+    return api('GET', 'Scan').then(function (s) {
+      var wasScanning = scan.scanning;
+      scan = s;
+      renderScan();
+      summary();
+      if (scan.scanning) scanTimer = setTimeout(loadScan, 3000);
+      else if (wasScanning) load(); // scan finished: moved items are back with their new paths
+    }).catch(function () {});
+  }
+  $('#mcScan').addEventListener('click', function () {
+    api('POST', 'Scan').then(function (s) { scan = s; scan.scanning = true; renderScan(); scanTimer = setTimeout(loadScan, 3000); })
+      .catch(function (e) { Dashboard.alert('Could not start the scan: ' + e.message); });
+  });
+
   function load() {
     $('#mcSummary').textContent = 'Loading…';
     progress('#mcProgress', { text: 'Loading ' + (type === 'series' ? 'series' : 'movies') + ' and building the preview…' });
@@ -788,6 +892,7 @@
         Object.keys(selected).forEach(function (k) { if (!planById(k)) delete selected[k]; });
         render();
         progress('#mcProgress', null);
+        loadScan();
       })
       .catch(function (e) { $('#mcSummary').textContent = 'Failed to load: ' + e.message; progress('#mcProgress', null); });
   }
@@ -1362,6 +1467,11 @@
       $('#mcTplSeriesDisplay').value = cfg.SeriesDisplayTemplate || '';
       $('#mcRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
       $('#mcUndoLimit').value = cfg.UndoHistoryLimit == null ? 5 : cfg.UndoHistoryLimit;
+      $('#mcAutoScan').checked = cfg.ScanAfterChanges !== false;
+      $('#mcLayout').value = cfg.SeriesLayout === 'nested' ? 'nested' : 'flat';
+      $('#mcTplFlatEpisode').value = cfg.FlatEpisodeTemplate || '';
+      layout = $('#mcLayout').value;
+      syncLayout();
       namingExample();
     });
   }
@@ -1386,13 +1496,17 @@
       cfg.CleanupRules = r.rules;
       var lim = parseInt($('#mcUndoLimit').value, 10);
       cfg.UndoHistoryLimit = isNaN(lim) ? 5 : (lim < 0 ? -1 : Math.max(1, lim));
+      cfg.ScanAfterChanges = $('#mcAutoScan').checked;
+      cfg.SeriesLayout = $('#mcLayout').value;
+      cfg.FlatEpisodeTemplate = $('#mcTplFlatEpisode').value.trim() || '{title} - {episode:00}';
+      layout = cfg.SeriesLayout;
       return ApiClient.updatePluginConfiguration(PLUGIN_ID, cfg);
     }).then(function () { hideModal('#mcNaming'); return load(); })
       .catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
   });
   ['#mcTplFolder', '#mcTplFile', '#mcTplDisplay', '#mcTplSeries', '#mcTplSeason', '#mcTplEpisode', '#mcTplSeriesDisplay', '#mcRules']
     .forEach(function (s) { $(s).addEventListener('input', namingExample); });
-  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes', '#mcFlatten'].forEach(function (s) { $(s).addEventListener('change', load); });
+  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes', '#mcFlatten', '#mcFlattenSeries'].forEach(function (s) { $(s).addEventListener('change', load); });
 
   // ---------------------------------------------------------------- panel events
   function setType(t) {
@@ -1441,6 +1555,16 @@
   $('#mcLockSel').addEventListener('click', function () { bulkLock(true); });
   $('#mcCombine').addEventListener('click', function () {
     var rows = selectedIds().map(planById);
+    if (layout === 'flat') {
+      if (!rows.length) return;
+      var name = prompt('Collection name (an existing collection with this name gets these added):',
+        commonTitle(rows.map(function (p) { return p.jellyfinName; })));
+      if (!name || !name.trim()) return;
+      api('POST', 'Collections', { name: name.trim(), itemIds: rows.map(function (p) { return p.itemId; }) })
+        .then(function () { Dashboard.alert('Added ' + noun(rows.length) + ' to the collection "' + name.trim() + '".'); selected = {}; render(); })
+        .catch(function (e) { Dashboard.alert('Could not add to the collection: ' + e.message); });
+      return;
+    }
     if (rows.length < 2) return;
     // a selected group brings all its folders along
     var ids = [];
@@ -1472,8 +1596,10 @@
       }, function (j) {
         progress('#mcProgress', null);
         var r = j.result || { done: 0, errors: ['no result'] };
-        Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\nA library scan has started.');
-        load();
+        loadScan().then(function () {
+          Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\n' + scanNote());
+          load();
+        });
       });
     }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Could not start: ' + e.message); });
   });
@@ -1523,9 +1649,11 @@
       }, function (j) {
         progress('#mcHistProgress', null);
         var r = j.result || { done: 0, errors: ['no result'] };
-        Dashboard.alert(what + ': ' + r.done + ' change(s) reversed.' + (r.errors.length ? '\n\nProblems:\n' + r.errors.join('\n') : '') +
-          '\n\nA library scan has started.');
-        loadHistory().then(load);
+        loadScan().then(function () {
+          Dashboard.alert(what + ': ' + r.done + ' change(s) reversed.' + (r.errors.length ? '\n\nProblems:\n' + r.errors.join('\n') : '') +
+            '\n\n' + scanNote());
+          loadHistory().then(load);
+        });
       });
     }).catch(function (e) { progress('#mcHistProgress', null); Dashboard.alert(what + ' failed: ' + e.message); });
   }
@@ -1600,6 +1728,16 @@
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;
     var id = rowEl.getAttribute('data-id'), p = planById(id);
+    var seasonEl = e.target.closest('.mc-season');
+    if (seasonEl && e.target.closest('.mc-season-edit')) {
+      var sid = seasonEl.getAttribute('data-season');
+      var cur = ((p.seasons || []).filter(function (s) { return s.itemId === sid; })[0] || {}).name || '';
+      var name = prompt('Season title (empty = back to the title from the metadata source):', cur);
+      if (name === null) return;
+      api('POST', 'SeasonName', { itemId: sid, name: name.trim() }).then(load)
+        .catch(function (err) { Dashboard.alert('Could not rename the season: ' + err.message); });
+      return;
+    }
     var memberEl = e.target.closest('.mc-member'), memberId = memberEl && memberEl.getAttribute('data-member');
     var groupIds = (p.members || []).map(function (m) { return m.itemId; });
     function regroup(path, body) { api('POST', path, body).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); }); }
@@ -1640,6 +1778,7 @@
     fitToContent();
     syncTypeVisibility();
     pollJobs(); // re-attach: show jobs that kept running while the page was closed
+    loadLayout();
     renderFilterMenu();
     load();
   });

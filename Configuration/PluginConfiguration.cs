@@ -53,6 +53,22 @@ public class PluginConfiguration : BasePluginConfiguration
     public int UndoHistoryLimit { get; set; } = 5;
 
     /// <summary>
+    /// Scan the libraries after every folder change (Adjust folders / Undo / Rewind). Off = changes wait until you press
+    /// "Scan library" (moved items disappear from Jellyfin until then).
+    /// </summary>
+    public bool ScanAfterChanges { get; set; } = true;
+
+    /// <summary>
+    /// "flat": every season is its own show (one top-level folder each; group a franchise with a Jellyfin collection) -
+    /// suits AniList / AniDB, where each season is its own entry. "nested": seasons live inside one show folder
+    /// ("Show/Season 2 - …/") - suits TMDB / TVDB.
+    /// </summary>
+    public string SeriesLayout { get; set; } = "flat";
+
+    /// <summary>Episode file template in the flat layout (no season folders). Tokens as for EpisodeTemplate.</summary>
+    public string FlatEpisodeTemplate { get; set; } = "{title} - {episode:00}";
+
+    /// <summary>
     /// Identifications a user confirmed with "Looks right". Each entry is the item's identity at that moment
     /// (type + provider IDs), so re-identifying it to something else clears the mark automatically.
     /// </summary>

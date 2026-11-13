@@ -1,5 +1,9 @@
 using System.Text.Json.Serialization;
 using Jellyfin.Plugin.MovieCurator.Curator;
+using Jellyfin.Data.Enums;
+using MediaBrowser.Controller.Collections;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.IO;
@@ -54,6 +58,21 @@ public class FolderRuleRequest
     [JsonPropertyName("season")] public int? Season { get; set; }
 }
 
+public class SeasonNameRequest
+{
+    [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Empty = back to the metadata source's title.</summary>
+    [JsonPropertyName("name")] public string? Name { get; set; }
+}
+
+public class CollectionRequest
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("itemIds")] public List<string> ItemIds { get; set; } = new();
+}
+
 public class NameRequest
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
@@ -80,11 +99,13 @@ public class CuratorController : ControllerBase
     private readonly ILibraryManager _library;
     private readonly IProviderManager _providers;
     private readonly IFileSystem _fileSystem;
+    private readonly ICollectionManager _collections;
     private readonly ILogger<CuratorController> _logger;
     private readonly CuratorService _service;
 
-    public CuratorController(ILibraryManager library, IProviderManager providers, IFileSystem fileSystem, ILogger<CuratorController> logger)
+    public CuratorController(ILibraryManager library, IProviderManager providers, IFileSystem fileSystem, ICollectionManager collections, ILogger<CuratorController> logger)
     {
+        _collections = collections;
         _library = library;
         _providers = providers;
         _fileSystem = fileSystem;
@@ -200,6 +221,58 @@ public class CuratorController : ControllerBase
     [HttpPost("WriteNfo")]
     public ActionResult<string> WriteNfo([FromBody] NfoRequest request)
         => Guid.TryParse(request.ItemId, out var id) && _library.GetItemById(id) is { } item ? _service.WriteNfo(item, request.LockNfo) : NotFound();
+
+    /// <summary>
+    /// Group shows (e.g. the seasons of one franchise in the flat layout) or movies into a Jellyfin collection.
+    /// An existing collection with that name is reused. Returns the collection's id.
+    /// </summary>
+    [HttpPost("Collections")]
+    public async Task<ActionResult<string>> AddToCollection([FromBody] CollectionRequest request)
+    {
+        var name = request.Name.Trim();
+        var ids = request.ItemIds.Select(i => Guid.TryParse(i, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct().ToList();
+        if (name.Length == 0 || ids.Count == 0)
+        {
+            return BadRequest("A name and at least one item are needed.");
+        }
+
+        var existing = _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true })
+            .OfType<BoxSet>()
+            .FirstOrDefault(b => string.Equals(b.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            await _collections.AddToCollectionAsync(existing.Id, ids).ConfigureAwait(false);
+            _logger.LogInformation("Curator: added {Count} item(s) to collection {Name}", ids.Count, name);
+            return existing.Id.ToString("N");
+        }
+
+        var box = await _collections.CreateCollectionAsync(new CollectionCreationOptions
+        {
+            Name = name,
+            ItemIdList = ids.Select(g => g.ToString("N")).ToArray(),
+            IsLocked = false,
+        }).ConfigureAwait(false);
+        _logger.LogInformation("Curator: created collection {Name} with {Count} item(s)", name, ids.Count);
+        return box.Id.ToString("N");
+    }
+
+    /// <summary>Library scan state: changes waiting for a scan, scan running.</summary>
+    [HttpGet("Scan")]
+    public ActionResult<ScanStatus> GetScan() => CuratorService.GetScanStatus();
+
+    /// <summary>Scan all libraries now (e.g. after a session of folder changes with automatic scanning off).</summary>
+    [HttpPost("Scan")]
+    public ActionResult<ScanStatus> StartScan()
+    {
+        _service.StartScan();
+        return CuratorService.GetScanStatus();
+    }
+
+    /// <summary>Set a season's title (locked), or clear it to get the metadata source's title back.</summary>
+    [HttpPost("SeasonName")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<ActionResult> SetSeasonName([FromBody] SeasonNameRequest request)
+        => await _service.SetSeasonName(request.ItemId, request.Name, HttpContext.RequestAborted).ConfigureAwait(false) ? NoContent() : NotFound();
 
     /// <summary>Set what happens to a subfolder (season number / separate show) or a loose video (Movies library).</summary>
     [HttpPost("FolderRule")]
