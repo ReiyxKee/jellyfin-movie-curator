@@ -96,15 +96,16 @@
   #MovieCuratorPage .mc-sources-list label { display: flex; gap: .45em; align-items: center; padding: .2em 0; font-size: .9em; cursor: pointer; }
   #MovieCuratorPage .mc-sources-list .mc-note { font-size: .75em; opacity: .65; margin-left: auto; padding-left: 1em; }
   @media (max-width: 700px) {
-    #MovieCuratorPage .mc-batch-row { grid-template-columns: auto minmax(0, 1fr); }
-    #MovieCuratorPage .mc-batch-row > div:last-child { grid-column: 1 / -1; }
+    #MovieCuratorPage .mc-batch-row { grid-template-columns: auto 40px minmax(0, 1fr); row-gap: .45em; }
+    #MovieCuratorPage .mc-batch-row img { width: 40px; height: 60px; }
+    #MovieCuratorPage .mc-batch-row .mc-arrow { justify-self: center; opacity: .7; }
     #MovieCuratorPage .mc-poster { width: 52px; height: 78px; }
     #MovieCuratorPage .mc-row { gap: .6em; }
     #MovieCuratorPage .mc-row > input[type=checkbox] { margin-top: 1.6em; }
     #MovieCuratorPage .mc-dialog.mc-split { max-height: 96vh; }
     #MovieCuratorPage .mc-modal { padding: 2vh .5em; }
     #MovieCuratorPage .mc-sep { display: none; }
-    #MovieCuratorPage .mc-batch-row img, #MovieCuratorPage .mc-batch-row .mc-arrow { display: none; }
+
   }
 </style>
 <div data-role="content">
