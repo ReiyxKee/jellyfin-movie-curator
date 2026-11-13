@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.5",
+        "changelog": "[experimental] - Season not longer grouped but treated as own series.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.5/movie-curator_1.1.0-exp.5.zip",
+        "checksum": "bed4710ff367286d52db9feb333ca798",
+        "timestamp": "2026-11-13T06:36:33Z"
+      },
+      {
         "version": "1.1.0.4",
         "changelog": "[experimental] - Debug Mobile View",
         "targetAbi": "10.11.0.0",
