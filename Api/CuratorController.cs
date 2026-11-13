@@ -161,7 +161,7 @@ public class CuratorController : ControllerBase
     public ActionResult<FolderJob> StartApplyJob([FromBody] ApplyRequest request)
     {
         var count = request.ItemIds.Count;
-        var title = $"{(request.MoveUp ? "Moving up" : "Adjusting folders")} ({count} {(request.IsSeries ? "series" : count == 1 ? "movie" : "movies")})";
+        var title = $"{(request.MoveUp ? "Moving up" : request.Mode == "move" ? "Moving folders" : request.Mode == "rename" ? "Renaming files" : "Adjusting folders")} ({count} {(request.IsSeries ? "series" : count == 1 ? "movie" : "movies")})";
         return FolderQueue.Start(title, report => _service.Apply(request.ItemIds, request, CancellationToken.None, report), _logger);
     }
 

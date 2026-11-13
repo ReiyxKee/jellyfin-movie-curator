@@ -38,6 +38,13 @@ public class PlanOptions
     /// <summary>"Move up" button: only take nested items out of their parent folder (no renames, NFOs, extras, trash).</summary>
     [JsonPropertyName("moveUp")] public bool MoveUp { get; set; }
 
+    /// <summary>
+    /// "move": only put things in the right place (new folders, up, Specials, Movies, group with, merges) - no renames.
+    /// "rename": only apply the naming rules (folder / file / episode names, NFOs, titles) - nothing changes place.
+    /// Empty: both.
+    /// </summary>
+    [JsonPropertyName("mode")] public string? Mode { get; set; }
+
     public bool IsSeries => string.Equals(Type, "series", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -1118,8 +1125,41 @@ public class CuratorService
         }
     }
 
+    /// <summary>Rename-only: drops the moves to another place, and the new folders only those needed.</summary>
+    private static List<PlanOp> RenameOnly(List<PlanOp> ops)
+    {
+        var kept = ops.Where(x => x.Kind != "mkdir" && (x.Note == null || !PlaceNotes.Contains(x.Note))).ToList();
+        var needed = ops.Where(x => x.Kind == "mkdir" && kept.Any(k => k.Kind != "rmdir" && (k.To == x.To || IsUnder(k.To, x.To)))).ToList();
+        return ops.Where(x => kept.Contains(x) || needed.Contains(x)).ToList();
+    }
+
+    /// <summary>Notes of the changes that move things to another place (Move folders), not just rename them.</summary>
+    private static readonly HashSet<string> PlaceNotes = new(StringComparer.Ordinal)
+    {
+        "flatten", "if empty after flatten", "group with", "to Specials", "to Movies library", "extras", "merged into extras",
+        "to curator trash", "empty show", "to trash",
+    };
+
     private List<ItemPlan> BuildPlanCore(PlanOptions opt)
     {
+        if (opt.Mode is "move" or "rename" && !opt.MoveUp)
+        {
+            var move = opt.Mode == "move";
+            var o = new PlanOptions
+            {
+                Type = opt.Type, LockNfo = opt.LockNfo,
+                Rename = !move && opt.Rename, Episodes = !move && opt.Episodes, Nfo = !move && opt.Nfo,
+                Flatten = move && opt.Flatten,
+            };
+            var list = opt.IsSeries ? BuildSeriesPlan(o) : BuildMoviePlan(o);
+            foreach (var p in list)
+            {
+                p.Ops = move ? p.Ops.Where(x => x.Kind is not ("nfo" or "display")).ToList() : RenameOnly(p.Ops);
+            }
+
+            return list;
+        }
+
         if (!opt.MoveUp)
         {
             return opt.IsSeries ? BuildSeriesPlan(opt) : BuildMoviePlan(opt);
@@ -1223,6 +1263,29 @@ public class CuratorService
         (p.GuessName, p.GuessYear) = layout == "single"
             ? GuessFromName(stem, System.IO.Path.GetFileName(dir))
             : GuessFromName(stem);
+
+        // "delete": the movie's folder (or the file with its sidecars) goes to the trash next to the library
+        var trashPath = layout == "single" ? dir : m.Path;
+        if (FolderRuleFor(trashPath)?.Action == "trash" && root.Length > 0)
+        {
+            var bin = TrashFor(trashPath, root);
+            MkDirs(p, ctx, System.IO.Path.GetDirectoryName(bin)!);
+            if (layout == "single")
+            {
+                Move(p, ctx, dir, bin, "dirmove", "to trash");
+            }
+            else
+            {
+                foreach (var f in new[] { m.Path }.Concat(Sidecars(m.Path, siblings)))
+                {
+                    Move(p, ctx, f, System.IO.Path.Combine(System.IO.Path.GetDirectoryName(bin)!, System.IO.Path.GetFileName(f)), "move", "to trash");
+                }
+            }
+
+            p.Warnings.Add("Deleted: moves to _curator_trash next to the library (undo brings it back; empty that folder yourself).");
+            p.TreeRoot = layout == "single" ? dir : null;
+            return p;
+        }
 
         // 0. display title shown in Jellyfin
         AddDisplayOp(p, m, names.Display);
@@ -1580,6 +1643,17 @@ public class CuratorService
         var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
         p.TreeRoot = dir;
+
+        // "delete": the whole show folder goes to the trash next to the library (nothing else changes this run)
+        if (FolderRuleFor(dir)?.Action == "trash")
+        {
+            var bin = TrashFor(dir, System.IO.Path.GetDirectoryName(dir)!);
+            MkDirs(p, ctx, System.IO.Path.GetDirectoryName(bin)!);
+            Move(p, ctx, dir, bin, "dirmove", "to trash");
+            p.Warnings.Add("Deleted: the folder moves to _curator_trash next to the library (undo brings it back; empty that folder yourself).");
+            p.Tree = BuildTree(dir, 1, null);
+            return p;
+        }
 
         // "group with": the whole show folder moves into another show's folder (nothing else changes this run)
         if (FolderRuleFor(dir) is { Action: "into", Target: { } intoDir } && Directory.Exists(intoDir) && !IsUnder(intoDir, dir))
@@ -2080,6 +2154,13 @@ public class CuratorService
     // ------------------------------------------------------------------ per-folder rules inside a series
     private static FolderRule? FolderRuleFor(string path) => Config.FolderRules.FirstOrDefault(r => r.Path == path);
 
+    /// <summary>"Delete": where it goes - "_curator_trash" next to the library folder (same drive, so instant; undo brings it back).</summary>
+    private static string TrashFor(string path, string libraryRoot)
+    {
+        var drive = System.IO.Path.GetDirectoryName(libraryRoot.TrimEnd('/')) ?? libraryRoot;
+        return System.IO.Path.Combine(drive, "_curator_trash", System.IO.Path.GetRelativePath(drive, path));
+    }
+
     private static readonly Regex OrderPrefix = new(@"^\d+\s*[.\-_)]\s*");
 
     /// <summary>
@@ -2091,7 +2172,7 @@ public class CuratorService
         List<string> excludedDirs, HashSet<string> excludedFiles, Func<string, bool> handledElsewhere)
     {
         var rules = Config.FolderRules
-            .Where(r => IsUnder(r.Path, itemDir) && r.Action is "up" or "extras" or "movies" or "show" or "into")
+            .Where(r => IsUnder(r.Path, itemDir) && r.Action is "up" or "extras" or "movies" or "show" or "into" or "trash")
             .Where(r => !handledElsewhere(r.Path) && !excludedFiles.Contains(r.Path) && (Directory.Exists(r.Path) || File.Exists(r.Path)))
             .OrderBy(r => r.Path.Length)
             .ToList();
@@ -2109,6 +2190,7 @@ public class CuratorService
             string? dst = r.Action switch
             {
                 "up" => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(parent)!, name),
+                "trash" => TrashFor(r.Path, libraryRoot),
                 "show" => System.IO.Path.Combine(libraryRoot, name),
                 "into" => string.IsNullOrEmpty(r.Target) || !Directory.Exists(r.Target) || IsUnder(r.Target, r.Path) ? null
                     : System.IO.Path.Combine(r.Target, name),
@@ -2130,6 +2212,7 @@ public class CuratorService
             {
                 "up" or "show" => "flatten",
                 "into" => "group with",
+                "trash" => "to trash",
                 "extras" => specials != null ? "to Specials" : "extras",
                 _ => "to Movies library",
             };
