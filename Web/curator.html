@@ -75,6 +75,18 @@
   #MovieCuratorPage .mc-season img { width: 112px; height: 168px; object-fit: cover; border-radius: 4px; background: var(--mc-soft); }
   #MovieCuratorPage .mc-season .mc-season-name { font-weight: 600; overflow-wrap: anywhere; line-height: 1.2; }
   #MovieCuratorPage .mc-season .mc-season-edit { cursor: pointer; opacity: .7; margin-left: .25em; }
+  #MovieCuratorPage .mc-tree { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
+  #MovieCuratorPage .mc-node { display: flex; flex-wrap: wrap; gap: .3em .8em; align-items: center; justify-content: space-between;
+    padding: .3em .5em .3em calc(.5em + (var(--d) - 1) * 1.3em); border-top: 1px solid var(--mc-line); font-size: .85em; }
+  #MovieCuratorPage .mc-tree > .mc-node:first-child { border-top: 0; }
+  #MovieCuratorPage .mc-node-name { min-width: 0; overflow-wrap: anywhere; flex: 1 1 16em; }
+  #MovieCuratorPage .mc-node-open { cursor: pointer; display: inline-block; width: 1em; text-decoration: none; }
+  #MovieCuratorPage .mc-node-acts { display: flex; flex-wrap: wrap; gap: .25em; align-items: center; }
+  #MovieCuratorPage .mc-node-btn { font: inherit; font-size: .92em; padding: .15em .5em; border: 1px solid var(--mc-line); border-radius: 4px;
+    background: var(--mc-soft); color: inherit; cursor: pointer; }
+  #MovieCuratorPage .mc-node-btn.on { border-color: #00a4dc; background: rgba(0,164,220,.28); }
+  #MovieCuratorPage .mc-node-season, #MovieCuratorPage .mc-node-ep { width: 4.4em; padding: .15em .3em; }
+  #MovieCuratorPage .mc-node-into, #MovieCuratorPage .mc-root-into { max-width: 13em; padding: .15em .3em; }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
   #MovieCuratorPage .mc-member { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; padding: .45em .6em; border-top: 1px solid var(--mc-line); }
@@ -282,6 +294,10 @@
         <label title="How many folder changes can be undone with 'Undo last folder change'. Older ones are forgotten. -1 = keep all.">
           Undo history <input class="mc-text" id="mcUndoLimit" type="number" min="-1" step="1" style="width:5em"> folder changes
           <span class="mc-meta">(-1 = keep every change; minimum 1)</span></label>
+        <label style="flex-basis:100%">Specials folder
+          <input class="mc-text" id="mcSpecials" placeholder="e.g. /onetouch/@Specials" style="min-width:min(18em, 100%)">
+          <span class="mc-meta">bonus material (NC/OP/ED, SPs, extras, trailers, OST, CDs, scans, fonts) moves here as &lt;folder&gt;/&lt;show&gt;/…,
+            outside the libraries. Empty = keep it inside the show as Jellyfin extras.</span></label>
       </div>
 
       <p class="mc-meta">Tokens: <code>{title}</code>, <code>{originalTitle}</code> (falls back to title), <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>, <code>{tvdb}</code>.
@@ -421,8 +437,9 @@
     switch (op.kind) {
       case 'mkdir': return '📁 new folder  ' + short(op.to, root) + '/';
       case 'dirmove':
-        return op.note === 'flatten'
-          ? '📤 move up  ' + short(op.from, root) + '/  →  ' + short(op.to, root) + '/'
+        var icon = { flatten: '📤 move up', 'group with': '🔗 group with', 'to Specials': '🎁 to Specials', 'to Movies library': '🎬 to Movies', extras: '🎁 extras' }[op.note];
+        return icon
+          ? icon + '  ' + short(op.from, root) + '/  →  ' + short(op.to, root) + '/'
           : '📁 rename folder  ' + from + '/  →  ' + to + '/';
       case 'rmdir': return '🗑 remove folder  ' + short(op.to, root) + '/  (' + (op.note || 'empty after moves') + ')';
       case 'nfo': return '📝 write ' + to + (op.note ? '  (' + op.note + ')' : '');
@@ -521,14 +538,14 @@
               '<option value="season"' + (f.action === 'season' ? ' selected' : '') + '>Season of this show</option>' +
               '<option value="show"' + (f.action === 'show' ? ' selected' : '') + '>Separate show (move out)</option>' +
               '<option value="movies"' + (f.action === 'movies' ? ' selected' : '') + '>Movie (move to Movies library)</option>' +
-              '<option value="extras"' + (f.action === 'extras' ? ' selected' : '') + '>Extras (NC, trailers, misc)</option>' +
+              '<option value="extras"' + (f.action === 'extras' ? ' selected' : '') + '>Extras / specials (NC, SPs, trailers, misc)</option>' +
               '<option value="episode"' + (f.action === 'episode' ? ' selected' : '') + '>Episode folder (move its files up)</option>' +
             '</select>' +
             (f.action === 'season'
               ? ' <input class="mc-text mc-folder-season" type="number" min="0" max="99" style="width:4.5em" value="' + (f.season != null ? f.season : '') + '" placeholder="?">' +
                 ' <span class="mc-tag' + (dup ? ' warn' : f.seasonSource === 'custom' ? ' info' : '') + '">' +
                 (dup ? 'same number as another folder' : esc(SOURCE_TEXT[f.seasonSource] || f.seasonSource)) + '</span>'
-              : ' <span class="mc-tag info">' + (f.action === 'movies' ? 'moves to the Movies library' : f.action === 'extras' ? 'shown under Extras, not as episodes' : f.action === 'episode' ? 'files move up into the show folder' : 'moves to the library root') + '</span>') +
+              : ' <span class="mc-tag info">' + (f.action === 'movies' ? 'moves to the Movies library' : f.action === 'extras' ? (specialsFolder ? 'moves to the Specials folder' : 'shown under Extras, not as episodes') : f.action === 'episode' ? 'files move up into the show folder' : 'moves to the library root') + '</span>') +
           '</div></div>';
       }).join('') +
       loose.map(function (v) {
@@ -539,6 +556,128 @@
             '<option value="movies"' + (v.action === 'movies' ? ' selected' : '') + '>Move to Movies library</option>' +
           '</select></div></div>';
       }).join('') + '</div>';
+  }
+
+  // ---------------------------------------------------------------- folder tree (every folder / file line has its own actions)
+  var openDirs = {}; // path -> 'loading' | listing of its files
+  var NODE_TAG = {
+    show: '⬆ becomes its own show', up: '⬆ moves up one level', episode: '📥 files merge into the show',
+    movies: '🎬 to Movies', into: '🔗 group with ', stay: '', season: ''
+  };
+  var EP_SRC = { custom: 'set by you', jellyfin: 'from Jellyfin', name: 'from the file name', none: '' };
+  /** Top-level show folders, for "Group with". */
+  function groupTargets(node) {
+    if (type !== 'series') return [];
+    return plans.map(function (p) { return p.treeRoot; }).filter(function (r) {
+      return r && r !== node.path && r.indexOf(node.path + '/') !== 0 && node.path.indexOf(r + '/') !== 0;
+    }).sort(function (a, b) { return a.localeCompare(b); });
+  }
+  function groupSelect(node, cls) {
+    return '<select class="mc-text ' + cls + '" title="Move it into another show\'s folder (it becomes part of that show)">' +
+      '<option value="">🔗 Group with…</option>' +
+      groupTargets(node).map(function (r) {
+        return '<option value="' + esc(r) + '"' + (node.action === 'into' && node.target === r ? ' selected' : '') + '>' + esc(r.split('/').pop()) + '</option>';
+      }).join('') + '</select>';
+  }
+  function nodeButtons(node, kind, depth, p) {
+    var a = node.action === 'season' || node.action === 'leave' ? 'stay' : node.action;
+    var series = p.kind === 'series';
+    var btn = function (act, label, title) {
+      return '<button type="button" class="mc-node-btn' + (a === act ? ' on' : '') + '" data-act="' + act + '" title="' + esc(title) + '">' + label + '</button>';
+    };
+    var b = [];
+    if (series && kind === 'dir' && depth === 1) {
+      b.push(btn('show', '⬆ Own show', 'Move it up to the library root as its own show'));
+      b.push(btn('episode', '📥 Merge', 'Move its files up into this show\'s folder'));
+    } else if (depth >= 2 || (!series && kind === 'dir')) {
+      b.push(btn('up', '⬆ Up', 'Move it up one level'));
+    }
+    b.push(btn('extras', '🎁 Specials', specialsFolder ? 'Move it to the Specials folder (' + specialsFolder + ')' : 'Make it a Jellyfin extra of this ' + (series ? 'show' : 'movie')));
+    b.push(btn('movies', '🎬 Movie', 'Move it to the Movies library as its own movie'));
+    b.push(btn('stay', '• Stay', 'Keep it where it is'));
+    if (series && kind === 'dir' && depth === 1 && a === 'stay') {
+      b.push('<input class="mc-text mc-node-season" type="number" min="0" max="99" placeholder="S#" title="Season number of this folder" value="' + (node.season != null ? node.season : '') + '">');
+    }
+    if (series && kind === 'file') {
+      b.push('<input class="mc-text mc-node-ep" type="number" min="0" max="9999" placeholder="E#" title="Episode number' +
+        (node.episodeSource && node.episodeSource !== 'none' ? ' (' + EP_SRC[node.episodeSource] + ')' : '') + '" value="' + (node.episode != null ? node.episode : '') + '">');
+    }
+    if (series) b.push(groupSelect(node, 'mc-node-into'));
+    if (kind === 'file' && node.itemId) b.push('<a class="mc-link" href="#/details?id=' + node.itemId + '&serverId=' + ApiClient.serverId() + '">Open</a>');
+    if (node.chosen) b.push('<a class="mc-link mc-node-reset" title="Forget your choice for this line">reset</a>');
+    return b.join('');
+  }
+  function nodeTag(node) {
+    var a = node.action;
+    var text = a === 'extras' ? (specialsFolder ? '🎁 to Specials' : '🎁 Jellyfin extra')
+      : a === 'into' ? NODE_TAG.into + (node.target || '').split('/').pop() : NODE_TAG[a] || '';
+    if (!text) return '';
+    return ' <span class="mc-tag ' + (node.chosen ? 'info' : '') + '" title="' + (node.chosen ? 'Your choice' : 'Suggested: click • Stay to keep it') + '">' +
+      esc(text) + (node.chosen ? '' : ' (suggested)') + '</span>';
+  }
+  function nodeLine(node, kind, depth, p) {
+    var isMain = kind === 'file' && p.kind === 'movie' && node.path === p.path;
+    var meta = kind === 'dir'
+      ? node.videoCount + ' video' + (node.videoCount === 1 ? '' : 's')
+      : isMain ? 'this movie' : p.kind === 'series' ? (node.episode != null ? 'E' + node.episode : 'no episode number') : '';
+    return '<div class="mc-node" data-path="' + esc(node.path) + '" data-kind="' + kind + '" style="--d:' + depth + '">' +
+        '<div class="mc-node-name">' +
+          (kind === 'dir' ? '<a class="mc-node-open" title="Show / hide its videos">' + (openDirs[node.path] ? '▾' : '▸') + '</a>' : '<span class="mc-node-open"></span>') +
+          (kind === 'dir' ? '📁 ' : '🎬 ') + esc(node.name) + ' <span class="mc-meta">' + esc(meta) + '</span>' + nodeTag(node) +
+        '</div>' +
+        (isMain ? '' : '<div class="mc-node-acts">' + nodeButtons(node, kind, depth, p) + '</div>') +
+      '</div>' +
+      (kind === 'dir' ? nodeChildren(node.path, node.children || [], depth + 1, p) : '');
+  }
+  function nodeChildren(path, dirs, depth, p) {
+    var out = dirs.map(function (c) { return nodeLine(c, 'dir', depth, p); }).join('');
+    var list = openDirs[path];
+    if (list === 'loading') out += '<div class="mc-node mc-meta" style="--d:' + depth + '">Loading…</div>';
+    else if (list) {
+      var files = list.filter(function (e) { return !e.isDir; });
+      out += files.length ? files.map(function (e) { return nodeLine(e, 'file', depth, p); }).join('')
+        : '<div class="mc-node mc-meta" style="--d:' + depth + '">No videos directly in here.</div>';
+    }
+    return out;
+  }
+  /** The show folder itself as a tree line: "into" when its plan moves it into another show. */
+  function rootNode(p) {
+    var op = (p.ops || []).filter(function (o) { return o.note === 'group with' && o.from === p.treeRoot; })[0];
+    return { path: p.treeRoot, action: op ? 'into' : '', target: op ? op.to.split('/').slice(0, -1).join('/') : '' };
+  }
+  function treeBlock(p) {
+    if (!p.treeRoot) return '';
+    var body = nodeChildren(p.treeRoot, p.tree || [], 1, p);
+    return body ? '<div class="mc-tree">' + body + '</div>' : '';
+  }
+  function openFolder(path, id) {
+    if (openDirs[path]) { delete openDirs[path]; renderRow(id); return; }
+    openDirs[path] = 'loading';
+    renderRow(id);
+    api('GET', 'Folder?path=' + encodeURIComponent(path)).then(function (list) { openDirs[path] = list || []; renderRow(id); })
+      .catch(function (e) { delete openDirs[path]; renderRow(id); Dashboard.alert('Could not list the folder: ' + e.message); });
+  }
+  /** Save one line's choice, then rebuild the preview (and re-list the open folders). */
+  function saveNode(body) {
+    return api('POST', 'FolderRule', body).then(function () {
+      var open = Object.keys(openDirs).filter(function (k) { return openDirs[k] !== 'loading'; });
+      return load().then(function () {
+        return Promise.all(open.map(function (path) {
+          return api('GET', 'Folder?path=' + encodeURIComponent(path)).then(function (l) { openDirs[path] = l || []; }).catch(function () { delete openDirs[path]; });
+        }));
+      }).then(render);
+    }).catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
+  }
+  function nodeOf(el) {
+    var n = el.closest('.mc-node'), rowEl = el.closest('.mc-row');
+    if (!n || !rowEl) return null;
+    var p = planById(rowEl.getAttribute('data-id')), path = n.getAttribute('data-path'), kind = n.getAttribute('data-kind');
+    var ep = n.querySelector('.mc-node-ep'), season = n.querySelector('.mc-node-season');
+    return {
+      id: p && p.itemId, path: path, kind: kind,
+      episode: ep && ep.value.trim() !== '' ? parseInt(ep.value, 10) : null,
+      season: season && season.value.trim() !== '' ? parseInt(season.value, 10) : null
+    };
   }
 
   function row(p) {
@@ -570,6 +709,9 @@
           '<button is="emby-button" type="button" class="raised mc-btn mc-lock"><span>' + (p.locked ? 'Unlock' : 'Lock') + '</span></button>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-identify"><span>Re-identify</span></button>' +
           '<a is="emby-linkbutton" class="raised emby-button mc-btn" href="' + detailsUrl + '">Open</a>' +
+          (p.treeRoot ? '<button is="emby-button" type="button" class="raised mc-btn mc-root-files" title="Show / hide the videos in this folder"><span>📂 Files ' +
+            (openDirs[p.treeRoot] ? '▾' : '▸') + '</span></button>' : '') +
+          (p.kind === 'series' && p.treeRoot ? groupSelect(rootNode(p), 'mc-root-into') : '') +
           (p.verified ? '<a href="#" class="mc-unverify mc-meta" style="margin-left:.3em" title="Remove the ✓ verified mark">Unmark</a>' : '') +
           (p.detached ? '<a class="mc-link mc-undo-detach" style="margin-left:.3em" title="Let it group with same-ID folders again">Undo detach</a>' : '') +
           '<span class="mc-folder-toggle">📁 ' + (nChanges ? nChanges + ' folder change' + (nChanges > 1 ? 's' : '') : 'folder tidy') +
@@ -577,7 +719,7 @@
         '</div>' +
         groupBlock(p) +
         seasonsBlock(p) +
-        seasonFoldersBlock(p) +
+        treeBlock(p) +
         (open[p.itemId] ? folderPanel(p) : '') +
       '</div></div>';
   }
@@ -899,6 +1041,7 @@
 
   // ---------------------------------------------------------------- series layout (flat = each season its own show)
   var layout = 'flat';
+  var specialsFolder = '';
   /** Movies always group into collections; series too in the flat layout (nested merges them as seasons instead). */
   function collectionMode() { return type === 'movies' || layout === 'flat'; }
   function syncLayout() {
@@ -909,6 +1052,7 @@
   function loadLayout() {
     return ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
       layout = cfg.SeriesLayout === 'nested' ? 'nested' : 'flat';
+      specialsFolder = cfg.SpecialsFolder || '';
       syncLayout();
     }).catch(function () {});
   }
@@ -1546,6 +1690,7 @@
       $('#mcTplSeriesDisplay').value = cfg.SeriesDisplayTemplate || '';
       $('#mcRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
       $('#mcUndoLimit').value = cfg.UndoHistoryLimit == null ? 5 : cfg.UndoHistoryLimit;
+      $('#mcSpecials').value = cfg.SpecialsFolder || '';
       $('#mcAutoScan').checked = cfg.ScanAfterChanges !== false;
       $('#mcLayout').value = cfg.SeriesLayout === 'nested' ? 'nested' : 'flat';
       $('#mcTplFlatEpisode').value = cfg.FlatEpisodeTemplate || '';
@@ -1576,6 +1721,8 @@
       var lim = parseInt($('#mcUndoLimit').value, 10);
       cfg.UndoHistoryLimit = isNaN(lim) ? 5 : (lim < 0 ? -1 : Math.max(1, lim));
       cfg.ScanAfterChanges = $('#mcAutoScan').checked;
+      cfg.SpecialsFolder = $('#mcSpecials').value.trim();
+      specialsFolder = cfg.SpecialsFolder;
       cfg.SeriesLayout = $('#mcLayout').value;
       cfg.FlatEpisodeTemplate = $('#mcTplFlatEpisode').value.trim() || '{title} - {episode:00}';
       layout = cfg.SeriesLayout;
@@ -1837,6 +1984,43 @@
   $('#mcList').addEventListener('keydown', function (e) {
     if (e.target.classList.contains('mc-title-input') && e.key === 'Enter') saveName(e.target.closest('.mc-row').getAttribute('data-id'), e.target.value);
   });
+  // folder tree: open a folder, pick an action, reset a choice
+  $('#mcList').addEventListener('click', function (e) {
+    var rowEl = e.target.closest('.mc-row');
+    if (!rowEl) return;
+    var id = rowEl.getAttribute('data-id'), p = planById(id);
+    if (e.target.closest('.mc-root-files') && p) { openFolder(p.treeRoot, id); return; }
+    var n = nodeOf(e.target);
+    if (!n) return;
+    if (e.target.closest('.mc-node-open') && n.kind === 'dir') { openFolder(n.path, id); return; }
+    if (e.target.closest('.mc-node-reset')) { saveNode({ path: n.path, action: 'auto' }); return; }
+    var b = e.target.closest('.mc-node-btn');
+    if (!b) return;
+    var act = b.getAttribute('data-act');
+    if (act === 'stay') act = n.kind === 'file' ? 'leave' : 'stay';
+    saveNode({ path: n.path, action: act, season: act === 'stay' ? n.season : null, episode: n.episode });
+  });
+  $('#mcList').addEventListener('change', function (e) {
+    var rowEl = e.target.closest('.mc-row');
+    if (!rowEl) return;
+    var p = planById(rowEl.getAttribute('data-id'));
+    if (e.target.classList.contains('mc-root-into') && p) {
+      saveNode(e.target.value ? { path: p.treeRoot, action: 'into', target: e.target.value } : { path: p.treeRoot, action: 'auto' });
+      return;
+    }
+    var n = nodeOf(e.target);
+    if (!n) return;
+    if (e.target.classList.contains('mc-node-into')) {
+      saveNode(e.target.value ? { path: n.path, action: 'into', target: e.target.value, episode: n.episode } : { path: n.path, action: 'auto' });
+    } else if (e.target.classList.contains('mc-node-season')) {
+      saveNode({ path: n.path, action: 'stay', season: n.season });
+    } else if (e.target.classList.contains('mc-node-ep')) {
+      var cur = e.target.closest('.mc-node').querySelector('.mc-node-btn.on');
+      var act = cur ? cur.getAttribute('data-act') : 'leave';
+      saveNode({ path: n.path, action: act === 'stay' ? 'leave' : act, episode: n.episode });
+    }
+  });
+
   $('#mcList').addEventListener('click', function (e) {
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;

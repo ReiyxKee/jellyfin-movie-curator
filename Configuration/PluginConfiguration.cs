@@ -59,6 +59,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool ScanAfterChanges { get; set; } = true;
 
     /// <summary>
+    /// Where a show's bonus material goes (NC/OP/ED, SPs, extras, trailers, OST, CDs, scans, fonts): moved to
+    /// "&lt;SpecialsFolder&gt;/&lt;show folder&gt;/&lt;subfolder&gt;", outside the libraries so the library holds only episodes.
+    /// Empty = keep them inside the show as Jellyfin extras (extras/, trailers/, other/).
+    /// </summary>
+    public string SpecialsFolder { get; set; } = string.Empty;
+
+    /// <summary>
     /// "flat": every season is its own show (one top-level folder each; group a franchise with a Jellyfin collection) -
     /// suits AniList / AniDB, where each season is its own entry. "nested": seasons live inside one show folder
     /// ("Show/Season 2 - …/") - suits TMDB / TVDB.
@@ -94,10 +101,19 @@ public class FolderRule
 {
     public string Path { get; set; } = string.Empty;
 
-    /// <summary>"season" (default) | "show" | "movies" | "leave"</summary>
+    /// <summary>
+    /// What to do with this folder / file: "season" / "leave" (stay) | "show" (own show at the library root) |
+    /// "up" (one level up) | "episode" (merge its files into the show) | "extras" (Specials) | "movies" | "into" (group with Target)
+    /// </summary>
     public string Action { get; set; } = "season";
 
     public int? Season { get; set; }
+
+    /// <summary>A video's episode number, set by hand (beats Jellyfin's and the file name's).</summary>
+    public int? Episode { get; set; }
+
+    /// <summary>"into": the folder (another show) this one is moved into.</summary>
+    public string? Target { get; set; }
 }
 
 public class SeriesGroup

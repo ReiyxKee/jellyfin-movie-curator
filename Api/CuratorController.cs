@@ -56,6 +56,12 @@ public class FolderRuleRequest
     [JsonPropertyName("action")] public string Action { get; set; } = "season";
 
     [JsonPropertyName("season")] public int? Season { get; set; }
+
+    /// <summary>A video's episode number (set by hand).</summary>
+    [JsonPropertyName("episode")] public int? Episode { get; set; }
+
+    /// <summary>"into": the show folder to move it into.</summary>
+    [JsonPropertyName("target")] public string? Target { get; set; }
 }
 
 public class SeasonNameRequest
@@ -278,7 +284,12 @@ public class CuratorController : ControllerBase
     [HttpPost("FolderRule")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult SetFolderRule([FromBody] FolderRuleRequest request)
-        => _service.SetFolderRule(request.Path, request.Action, request.Season) ? NoContent() : BadRequest("Path is not inside a library.");
+        => _service.SetFolderRule(request.Path, request.Action, request.Season, request.Episode, request.Target)
+            ? NoContent() : BadRequest("Path is not inside a library (or the 'group with' target is invalid).");
+
+    /// <summary>A folder's subfolders and videos ("📂 Open" in the folder tree).</summary>
+    [HttpGet("Folder")]
+    public ActionResult<List<FolderEntry>> ListFolder([FromQuery] string path) => _service.ListFolder(path);
 
     /// <summary>Combine series folders into one show (as seasons), whatever their IDs.</summary>
     [HttpPost("Group/Combine")]

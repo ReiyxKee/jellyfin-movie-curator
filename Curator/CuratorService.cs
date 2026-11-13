@@ -133,6 +133,12 @@ public class ItemPlan
     /// <summary>Series: unnumbered videos directly in the series folder (movies / specials).</summary>
     [JsonPropertyName("looseVideos")] public List<LooseVideoInfo> LooseVideos { get; set; } = new();
 
+    /// <summary>The item's folder tree (subfolders, any depth) with what happens to each.</summary>
+    [JsonPropertyName("tree")] public List<TreeNode> Tree { get; set; } = new();
+
+    /// <summary>The folder the tree is of (show folder / the movie's own folder).</summary>
+    [JsonPropertyName("treeRoot")] public string? TreeRoot { get; set; }
+
     /// <summary>Series: every folder in this group ("auto" = same IDs, "manual" = combined by you); empty when alone.</summary>
     [JsonPropertyName("members")] public List<GroupMember> Members { get; set; } = new();
 
@@ -232,6 +238,56 @@ public class SeasonFolderInfo
 }
 
 /// <summary>A video directly in a series folder that Jellyfin couldn't number (often a movie or special).</summary>
+/// <summary>A folder in an item's folder tree, with what happens to it.</summary>
+public class TreeNode
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("depth")] public int Depth { get; set; }
+
+    [JsonPropertyName("videoCount")] public int VideoCount { get; set; }
+
+    /// <summary>stay | season | show | up | episode | extras | movies | into</summary>
+    [JsonPropertyName("action")] public string Action { get; set; } = "stay";
+
+    /// <summary>true when you chose the action (false = the curator's suggestion / default).</summary>
+    [JsonPropertyName("chosen")] public bool Chosen { get; set; }
+
+    [JsonPropertyName("season")] public int? Season { get; set; }
+
+    [JsonPropertyName("target")] public string? Target { get; set; }
+
+    [JsonPropertyName("children")] public List<TreeNode> Children { get; set; } = new();
+}
+
+/// <summary>One entry of a folder listing ("📂 Open").</summary>
+public class FolderEntry
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("isDir")] public bool IsDir { get; set; }
+
+    [JsonPropertyName("videoCount")] public int VideoCount { get; set; }
+
+    [JsonPropertyName("action")] public string Action { get; set; } = "stay";
+
+    [JsonPropertyName("chosen")] public bool Chosen { get; set; }
+
+    [JsonPropertyName("target")] public string? Target { get; set; }
+
+    /// <summary>Episode number in use: yours, Jellyfin's, or read from the file name.</summary>
+    [JsonPropertyName("episode")] public int? Episode { get; set; }
+
+    /// <summary>custom | jellyfin | name | none</summary>
+    [JsonPropertyName("episodeSource")] public string EpisodeSource { get; set; } = "none";
+
+    [JsonPropertyName("itemId")] public string? ItemId { get; set; }
+}
+
 public class LooseVideoInfo
 {
     [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
@@ -344,6 +400,16 @@ public class CuratorService
     private static Configuration.PluginConfiguration Config => Plugin.Instance!.Configuration;
 
     private static string LogDir => System.IO.Path.Combine(Plugin.Instance!.DataFolderPath, "logs");
+
+    /// <summary>The configured Specials folder (bonus material outside the libraries), or null when not used / missing.</summary>
+    private static string? SpecialsRoot =>
+        string.IsNullOrWhiteSpace(Config.SpecialsFolder) || !Directory.Exists(Config.SpecialsFolder.Trim())
+            ? null : Config.SpecialsFolder.Trim().TrimEnd('/');
+
+    /// <summary>Bonus folders without videos (soundtracks, scans, fonts...): moved to the Specials folder too, when set.</summary>
+    private static readonly Regex BonusNoVideo = new(
+        @"^(ost( disc \d+)?|soundtracks?|cds?|special cds?|drama cds?|scans|bluray scans|bd scans|audio dramas?|end ?cards|fonts|menus?|subs?|subtitles|字幕.*)$",
+        RegexOptions.IgnoreCase);
 
     /// <summary>Leftover files of removed empty folders go here (never deleted; undo moves them back).</summary>
     private static string TrashDir => System.IO.Path.Combine(Plugin.Instance!.DataFolderPath, "trash");
@@ -848,7 +914,10 @@ public class CuratorService
     }
 
     /// <summary>Jellyfin's episode number, else the one read from the file name.</summary>
-    private static int? EpNumber(Ctx ctx, Episode e) => e.IndexNumber ?? (ctx.EpNo.TryGetValue(e.Path ?? string.Empty, out var n) ? n : null);
+    private static int? EpNumber(Ctx ctx, Episode e) =>
+        FolderRuleFor(e.Path ?? string.Empty)?.Episode
+        ?? e.IndexNumber
+        ?? (ctx.EpNo.TryGetValue(e.Path ?? string.Empty, out var n) ? n : null);
 
     private static readonly Regex EpMarker = new(
         @"\bS\d{1,2}\s*E(?<n>\d{1,4})(?!\d)|\bEp?(?:isode)?\.?\s*(?<n>\d{1,4})(?!\d)|#(?<n>\d{1,4})(?!\d)"
@@ -1060,7 +1129,7 @@ public class CuratorService
         // drop their other changes (extras, Movies library, trash) - those stay for Adjust folders
         var plain = new PlanOptions { Type = opt.Type, Rename = false, Episodes = false, Nfo = false, LockNfo = opt.LockNfo, Flatten = true };
         var plans = opt.IsSeries ? BuildSeriesPlan(plain) : BuildMoviePlan(plain);
-        var other = new HashSet<string>(StringComparer.Ordinal) { "extras", "merged into extras", "to Movies library", "to curator trash", "empty show" };
+        var other = new HashSet<string>(StringComparer.Ordinal) { "extras", "merged into extras", "to Movies library", "to curator trash", "empty show", "to Specials", "group with" };
         foreach (var p in plans)
         {
             p.Ops = p.Ops.Any(o => o.Note == "flatten")
@@ -1215,6 +1284,15 @@ public class CuratorService
         if (opt.Rename && layout == "single")
         {
             PlanOrphanSubs(p, ctx, dir, target, handled, names.File, m.ProductionYear);
+        }
+
+        // 3b. moves chosen per folder / file inside the movie's own folder
+        if (layout == "single")
+        {
+            ApplyManualRules(p, ctx, dir, System.IO.Path.GetFileName(final), root, root, new List<string>(), new HashSet<string>(StringComparer.Ordinal),
+                path => path == m.Path);
+            p.TreeRoot = dir;
+            p.Tree = BuildTree(dir, 1, null);
         }
 
         // 4. folder rename (and/or move up out of a collection folder)
@@ -1501,6 +1579,18 @@ public class CuratorService
 
         var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
+        p.TreeRoot = dir;
+
+        // "group with": the whole show folder moves into another show's folder (nothing else changes this run)
+        if (FolderRuleFor(dir) is { Action: "into", Target: { } intoDir } && Directory.Exists(intoDir) && !IsUnder(intoDir, dir))
+        {
+            var grouped = System.IO.Path.Combine(intoDir, System.IO.Path.GetFileName(dir));
+            Move(p, ctx, dir, grouped, "dirmove", "group with");
+            p.FinalPath = grouped;
+            p.Warnings.Add($"Moves into {System.IO.Path.GetFileName(intoDir)}/ (group with). After the scan it shows up there as a subfolder.");
+            p.Tree = BuildTree(dir, 1, null);
+            return p;
+        }
 
         // empty show (no episode files, no videos at all): clear the leftover folder out. Its files (artwork, NFO)
         // go to the curator's trash folder - logged like every change, so Undo / Rewind brings them back.
@@ -1586,7 +1676,7 @@ public class CuratorService
                 var fs = FolderSeason(sub, inSub);
                 var rule = FolderRuleFor(sub);
                 var subName = System.IO.Path.GetFileName(sub).Trim();
-                var action = rule?.Action is "show" or "movies" or "extras" or "episode" ? rule.Action
+                var action = rule?.Action is "show" or "movies" or "extras" or "episode" or "into" ? rule.Action
                     : rule != null ? "season"
                     : ExtrasLike.IsMatch(subName) || JellyfinExtras.ContainsKey(subName) ? "extras"
                     : VideoCount(sub) == 1 && MovieLike.IsMatch(subName) ? "movies"
@@ -1602,7 +1692,11 @@ public class CuratorService
                     SeasonSource = fs.Source,
                     Action = action,
                 });
-                if (action == "show")
+                if (action == "into")
+                {
+                    // "group with": moved by ApplyManualRules below
+                }
+                else if (action == "show")
                 {
                     excludedDirs.Add(sub);
                     var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mDir)!, FlattenName(System.IO.Path.GetFileName(mDir), System.IO.Path.GetFileName(sub)));
@@ -1636,7 +1730,15 @@ public class CuratorService
                     // bonus content (NCOP/NCED, CMs, PVs, menus, trailers): not episodes. Jellyfin shows a show's extras only
                     // from its own folder names (extras/, trailers/, other/ ...), so other names are moved into one of those.
                     excludedDirs.Add(sub);
-                    var target = System.IO.Path.Combine(mDir, ExtrasFolderFor(subName));
+                    var specials = SpecialsRoot;
+                    var target = specials != null
+                        ? System.IO.Path.Combine(specials, Safe(System.IO.Path.GetFileName(string.IsNullOrEmpty(p.FinalPath) ? mDir : p.FinalPath)), subName) // out of the library
+                        : System.IO.Path.Combine(mDir, ExtrasFolderFor(subName));
+                    if (specials != null)
+                    {
+                        MkDirs(p, ctx, System.IO.Path.GetDirectoryName(target)!);
+                    }
+
                     if (target != sub)
                     {
                         if (!Directory.Exists(target) && !ctx.Taken.Contains(target))
@@ -1674,9 +1776,27 @@ public class CuratorService
                 }
             }
 
+            // soundtracks, scans, fonts...: no videos, so not in the panel; with a Specials folder they leave the library too
+            if (SpecialsRoot is { } bonusRoot)
+            {
+                foreach (var d in Directory.GetDirectories(mDir).Where(d => !IsJunk(d) && !HasVideosBelow(d)
+                    && BonusNoVideo.IsMatch(System.IO.Path.GetFileName(d).Trim())).OrderBy(d => d, StringComparer.Ordinal))
+                {
+                    var dst = System.IO.Path.Combine(bonusRoot, Safe(System.IO.Path.GetFileName(string.IsNullOrEmpty(p.FinalPath) ? mDir : p.FinalPath)), System.IO.Path.GetFileName(d));
+                    if (Directory.Exists(dst) || ctx.Taken.Contains(dst))
+                    {
+                        p.Warnings.Add($"Not moved to Specials, already there: {System.IO.Path.GetFileName(d)}/");
+                        continue;
+                    }
+
+                    MkDirs(p, ctx, System.IO.Path.GetDirectoryName(dst)!);
+                    Move(p, ctx, d, dst, "dirmove", "to Specials");
+                }
+            }
+
             if (p.SeasonFolders.Count < 2 && members.Count == 1 && !p.SeasonFolders.Any(f => f.Action != "season"))
             {
-                p.SeasonFolders.Clear(); // a single subfolder isn't worth a panel
+                // (kept: the folder tree shows every subfolder)
             }
 
             // unnumbered videos directly in the series folder (movies / specials): leave, or move to the Movies library
@@ -1704,6 +1824,12 @@ public class CuratorService
                     p.Warnings.Add("No Movies library found to move videos into.");
                 }
             }
+
+            // moves chosen per folder / file at any depth (first-level folders' other actions are handled above)
+            var memberDir = mDir;
+            ApplyManualRules(p, ctx, mDir, System.IO.Path.GetFileName(string.IsNullOrEmpty(p.FinalPath) ? mDir : p.FinalPath),
+                System.IO.Path.GetDirectoryName(dir)!, moviesRoot, excludedDirs, excludedFiles,
+                path => Directory.Exists(path) && System.IO.Path.GetDirectoryName(path) == memberDir && FolderRuleFor(path)?.Action != "into");
 
             var eps = rawEps
                 .Where(e => !excludedFiles.Contains(e.Path) && !excludedDirs.Any(d => IsUnder(e.Path, d)))
@@ -1745,6 +1871,25 @@ public class CuratorService
         {
             Move(p, ctx, dir, final, "dirmove");
         }
+
+        // folder tree of the main folder: first-level folders show the action planned above (yours or the suggestion)
+        p.Tree = BuildTree(dir, 1, d =>
+        {
+            var rule = FolderRuleFor(d);
+            if (p.SeasonFolders.FirstOrDefault(f => f.Path == d) is { } sf)
+            {
+                return new TreeNode { Action = sf.Action, Season = sf.Season, Chosen = rule != null, Target = rule?.Target };
+            }
+
+            var bonus = SpecialsRoot != null && !HasVideosBelow(d) && BonusNoVideo.IsMatch(System.IO.Path.GetFileName(d).Trim());
+            return new TreeNode
+            {
+                Action = rule?.Action is { } a && a != "leave" ? a : bonus ? "extras" : "stay",
+                Chosen = rule != null,
+                Season = rule?.Season,
+                Target = rule?.Target,
+            };
+        });
 
         // 4. tvshow.nfo
         if (opt.Nfo)
@@ -1935,21 +2080,195 @@ public class CuratorService
     // ------------------------------------------------------------------ per-folder rules inside a series
     private static FolderRule? FolderRuleFor(string path) => Config.FolderRules.FirstOrDefault(r => r.Path == path);
 
-    /// <summary>Save what to do with a subfolder (season number / separate show) or a loose video (Movies library).</summary>
-    public bool SetFolderRule(string path, string action, int? season)
+    private static readonly Regex OrderPrefix = new(@"^\d+\s*[.\-_)]\s*");
+
+    /// <summary>
+    /// The moves you chose per folder / file inside <paramref name="itemDir"/> (any depth), like moving them by hand:
+    /// up one level, to the library root as its own show, into another show ("group with"), to Specials, to Movies.
+    /// Paths inside something that already moves are skipped (they travel with it).
+    /// </summary>
+    private static void ApplyManualRules(ItemPlan p, Ctx ctx, string itemDir, string ownerName, string libraryRoot, string? moviesRoot,
+        List<string> excludedDirs, HashSet<string> excludedFiles, Func<string, bool> handledElsewhere)
+    {
+        var rules = Config.FolderRules
+            .Where(r => IsUnder(r.Path, itemDir) && r.Action is "up" or "extras" or "movies" or "show" or "into")
+            .Where(r => !handledElsewhere(r.Path) && !excludedFiles.Contains(r.Path) && (Directory.Exists(r.Path) || File.Exists(r.Path)))
+            .OrderBy(r => r.Path.Length)
+            .ToList();
+        foreach (var r in rules)
+        {
+            if (excludedDirs.Any(d => IsUnder(r.Path, d)))
+            {
+                continue; // moves along with a folder above it
+            }
+
+            var isDir = Directory.Exists(r.Path);
+            var name = System.IO.Path.GetFileName(r.Path);
+            var parent = System.IO.Path.GetDirectoryName(r.Path)!;
+            var specials = SpecialsRoot;
+            string? dst = r.Action switch
+            {
+                "up" => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(parent)!, name),
+                "show" => System.IO.Path.Combine(libraryRoot, name),
+                "into" => string.IsNullOrEmpty(r.Target) || !Directory.Exists(r.Target) || IsUnder(r.Target, r.Path) ? null
+                    : System.IO.Path.Combine(r.Target, name),
+                "extras" => specials != null
+                    ? System.IO.Path.Combine(specials, Safe(ownerName), System.IO.Path.GetRelativePath(itemDir, r.Path))
+                    : System.IO.Path.Combine(itemDir, "extras", name),
+                "movies" => moviesRoot == null ? null
+                    : isDir ? System.IO.Path.Combine(moviesRoot, Safe(CleanName(OrderPrefix.Replace(name, string.Empty))))
+                    : System.IO.Path.Combine(moviesRoot, Safe(CleanName(System.IO.Path.GetFileNameWithoutExtension(name))), name),
+                _ => null,
+            };
+            if (dst == null)
+            {
+                p.Warnings.Add($"Can't apply \"{r.Action}\" to {name}: " + (r.Action == "movies" ? "no Movies library" : "the target folder is missing"));
+                continue;
+            }
+
+            var note = r.Action switch
+            {
+                "up" or "show" => "flatten",
+                "into" => "group with",
+                "extras" => specials != null ? "to Specials" : "extras",
+                _ => "to Movies library",
+            };
+            MkDirs(p, ctx, System.IO.Path.GetDirectoryName(dst)!);
+            if (isDir)
+            {
+                if (Move(p, ctx, r.Path, dst, "dirmove", note))
+                {
+                    excludedDirs.Add(r.Path);
+                }
+            }
+            else
+            {
+                var dstDir = System.IO.Path.GetDirectoryName(dst)!;
+                foreach (var f in new[] { r.Path }.Concat(Sidecars(r.Path, Directory.GetFiles(parent))))
+                {
+                    Move(p, ctx, f, System.IO.Path.Combine(dstDir, System.IO.Path.GetFileName(f)), "move", note);
+                }
+
+                excludedFiles.Add(r.Path);
+            }
+        }
+    }
+
+    /// <summary>The subfolders of <paramref name="dir"/> (any depth, up to 4 levels) with what happens to each.</summary>
+    private static List<TreeNode> BuildTree(string dir, int depth, Func<string, TreeNode?>? firstLevel)
+    {
+        var nodes = new List<TreeNode>();
+        if (depth > 4)
+        {
+            return nodes;
+        }
+
+        foreach (var d in Directory.GetDirectories(dir).Where(d => !IsJunk(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+        {
+            var node = firstLevel?.Invoke(d);
+            if (node == null)
+            {
+                var rule = FolderRuleFor(d);
+                node = new TreeNode
+                {
+                    Action = rule?.Action is { } a && a != "leave" ? a : "stay",
+                    Chosen = rule != null,
+                    Season = rule?.Season,
+                    Target = rule?.Target,
+                };
+            }
+
+            node.Path = d;
+            node.Name = System.IO.Path.GetFileName(d);
+            node.Depth = depth;
+            node.VideoCount = VideoCount(d);
+            node.Children = BuildTree(d, depth + 1, null);
+            nodes.Add(node);
+        }
+
+        return nodes;
+    }
+
+    /// <summary>"📂 Open": a folder's subfolders and videos, with each one's action and episode number.</summary>
+    public List<FolderEntry> ListFolder(string path)
     {
         path = path.TrimEnd('/');
-        if (!LibraryRoots().Any(r => IsUnder(path, r)) || !(Directory.Exists(path) || File.Exists(path)))
+        if (!LibraryRoots().Any(r => path == r || IsUnder(path, r)) || !Directory.Exists(path))
+        {
+            return new List<FolderEntry>();
+        }
+
+        var list = new List<FolderEntry>();
+        foreach (var d in Directory.GetDirectories(path).Where(d => !IsJunk(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+        {
+            var rule = FolderRuleFor(d);
+            list.Add(new FolderEntry
+            {
+                Path = d, Name = System.IO.Path.GetFileName(d), IsDir = true, VideoCount = VideoCount(d),
+                Action = rule?.Action is { } a && a != "leave" ? a : "stay", Chosen = rule != null, Target = rule?.Target,
+            });
+        }
+
+        var files = Directory.GetFiles(path).Where(f => !IsJunk(f) && IsVideo(f)).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        var items = files.ToDictionary(f => f, f => _library.FindByPath(f, false), StringComparer.Ordinal);
+        var ctx = new Ctx();
+        FillEpisodeNumbers(ctx, items.Values.OfType<Episode>());
+        foreach (var f in files)
+        {
+            var rule = FolderRuleFor(f);
+            var item = items[f];
+            var e = new FolderEntry
+            {
+                Path = f, Name = System.IO.Path.GetFileName(f), VideoCount = 1,
+                Action = rule?.Action is { } a && a != "leave" ? a : "stay", Chosen = rule != null && rule.Action != "leave", Target = rule?.Target,
+                ItemId = item?.Id.ToString("N"),
+            };
+            if (rule?.Episode is int own)
+            {
+                (e.Episode, e.EpisodeSource) = (own, "custom");
+            }
+            else if (item is Episode ep && ep.IndexNumber is int jf)
+            {
+                (e.Episode, e.EpisodeSource) = (jf, "jellyfin");
+            }
+            else if (ctx.EpNo.TryGetValue(f, out var parsed))
+            {
+                (e.Episode, e.EpisodeSource) = (parsed, "name");
+            }
+
+            list.Add(e);
+        }
+
+        return list;
+    }
+
+    /// <summary>Save what to do with a subfolder (season number / separate show) or a loose video (Movies library).</summary>
+    public bool SetFolderRule(string path, string action, int? season, int? episode = null, string? target = null)
+    {
+        path = path.TrimEnd('/');
+        var roots = LibraryRoots();
+        if (!roots.Any(r => IsUnder(path, r)) || !(Directory.Exists(path) || File.Exists(path)))
+        {
+            return false;
+        }
+
+        target = target?.TrimEnd('/');
+        if (action == "into" && (string.IsNullOrEmpty(target) || !Directory.Exists(target) || !roots.Any(r => IsUnder(target, r))
+            || target == path || IsUnder(target, path)))
         {
             return false;
         }
 
         Config.FolderRules.RemoveAll(r => r.Path == path);
-        // "season" is kept even without a number: it overrides an automatic "separate show" / "movie" default
-        var automatic = action == "leave";
+        // "season" / "stay" is kept even without a number: it overrides an automatic suggestion ("separate show", "movie" ...)
+        var automatic = (action == "leave" && episode == null) || action == "auto";
         if (!automatic)
         {
-            Config.FolderRules.Add(new FolderRule { Path = path, Action = action, Season = season });
+            Config.FolderRules.Add(new FolderRule
+            {
+                Path = path, Action = action == "stay" ? "season" : action, Season = season, Episode = episode,
+                Target = action == "into" ? target : null,
+            });
         }
 
         Plugin.Instance!.SaveConfiguration();
