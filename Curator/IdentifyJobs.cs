@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
+using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.IO;
@@ -284,6 +286,10 @@ public static class IdentifyQueue
             Step(2, "applying match (fetching metadata)");
             logger.LogInformation("Curator: applying {Match} to {Name}", it.Match, item.Name);
             item.ProviderIds = it.Result.ProviderIds;
+
+            // a show's refresh also re-fetches every episode (a minute or more for long shows): report how far it got
+            using var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var progress = item is Series ? WatchEpisodes(it, id, library, watch.Token) : Task.CompletedTask;
             await providers.RefreshFullItem(
                 item,
                 new MetadataRefreshOptions(new DirectoryService(fileSystem))
@@ -296,6 +302,8 @@ public static class IdentifyQueue
                     RemoveOldMetadata = true,
                 },
                 ct).ConfigureAwait(false);
+            await watch.CancelAsync().ConfigureAwait(false);
+            await progress.ConfigureAwait(false);
             item = library.GetItemById(id) ?? item;
 
             Step(3, "writing new NFO");
@@ -332,6 +340,42 @@ public static class IdentifyQueue
     }
 
     /// <summary>Force stop: put the item back the way it was (IDs, titles, lock, NFO files, verified mark).</summary>
+    /// <summary>While Jellyfin refreshes a show, counts the episodes it has refreshed since the step started.</summary>
+    private static async Task WatchEpisodes(IdentifyJobItem it, Guid seriesId, ILibraryManager library, CancellationToken ct)
+    {
+        var start = DateTime.UtcNow;
+        try
+        {
+            var episodes = library.GetItemList(new InternalItemsQuery
+            {
+                AncestorIds = new[] { seriesId },
+                IncludeItemTypes = new[] { BaseItemKind.Episode },
+                Recursive = true,
+            }).Select(e => e.Id).ToList();
+            if (episodes.Count == 0)
+            {
+                return;
+            }
+
+            while (!ct.IsCancellationRequested)
+            {
+                var done = episodes.Count(e => library.GetItemById(e) is { } ep && ep.DateLastRefreshed >= start);
+                it.Step = done == 0
+                    ? $"applying match (fetching show metadata, then {episodes.Count} episodes)"
+                    : $"applying match (episodes {done} / {episodes.Count})";
+                await Task.Delay(1000, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // refresh finished (or the job was stopped)
+        }
+        catch (Exception)
+        {
+            // progress is only a nicety: never fail the identify over it
+        }
+    }
+
     private static async Task RollBack(IdentifyJobItem it, Guid id, Snapshot? before, CuratorService service, ILibraryManager library, ILogger logger)
     {
         it.Step = "rolling back";
