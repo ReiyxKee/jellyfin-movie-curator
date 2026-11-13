@@ -10,6 +10,7 @@
   #MovieCuratorPage .content-primary { min-width: 0; }
   #MovieCuratorPage .mc-text { box-sizing: border-box; max-width: 100%; padding: .4em .6em; background: var(--mc-soft); color: inherit; border: 1px solid var(--mc-line); border-radius: 4px; font: inherit; }
   #MovieCuratorPage .mc-summary { font-size: .85em; opacity: .8; }
+  #MovieCuratorPage .mc-version { font-size: .55em; font-weight: normal; opacity: .6; margin-left: .5em; }
   #MovieCuratorPage .mc-tag { display: inline-block; font-size: .72em; font-weight: normal; padding: .1em .55em; border-radius: 999px; background: var(--mc-soft); vertical-align: middle; margin-left: .3em; }
   #MovieCuratorPage .mc-tag.warn { background: rgba(224,160,48,.3); }
   #MovieCuratorPage .mc-tag.ok { background: var(--mc-ok); }
@@ -115,7 +116,7 @@
 </style>
 <div data-role="content">
 <div class="content-primary">
-  <h2 class="sectionTitle">Movie Curator</h2>
+  <h2 class="sectionTitle">Movie Curator<span class="mc-version" id="mcVersion"></span></h2>
 
   <!-- ============================================================ sticky control panel -->
   <div class="mc-panel" id="mcPanel">
@@ -500,12 +501,13 @@
             '<select class="mc-text mc-folder-action">' +
               '<option value="season"' + (f.action === 'season' ? ' selected' : '') + '>Season of this show</option>' +
               '<option value="show"' + (f.action === 'show' ? ' selected' : '') + '>Separate show (move out)</option>' +
+              '<option value="movies"' + (f.action === 'movies' ? ' selected' : '') + '>Movie (move to Movies library)</option>' +
             '</select>' +
             (f.action === 'season'
               ? ' <input class="mc-text mc-folder-season" type="number" min="0" max="99" style="width:4.5em" value="' + (f.season != null ? f.season : '') + '" placeholder="?">' +
                 ' <span class="mc-tag' + (dup ? ' warn' : f.seasonSource === 'custom' ? ' info' : '') + '">' +
                 (dup ? 'same number as another folder' : esc(SOURCE_TEXT[f.seasonSource] || f.seasonSource)) + '</span>'
-              : ' <span class="mc-tag info">moves to the library root</span>') +
+              : ' <span class="mc-tag info">' + (f.action === 'movies' ? 'moves to the Movies library' : 'moves to the library root') + '</span>') +
           '</div></div>';
       }).join('') +
       loose.map(function (v) {
@@ -591,7 +593,7 @@
       { group: 'Folders', key: 'detached', label: 'Detached', test: function (p) { return p.detached; } },
       { group: 'Folders', key: 'unnumbered', label: 'Episodes without numbers', test: function (p) { return p.episodesSkipped > 0; } },
       { group: 'Folders', key: 'seasonfolders', label: '📂 Has season subfolders', test: function (p) { return (p.seasonFolders || []).length > 1; } },
-      { group: 'Folders', key: 'loose', label: '🎬 Loose movies / specials', test: function (p) { return (p.looseVideos || []).length > 0; } }
+      { group: 'Folders', key: 'loose', label: '🎬 Loose movies / specials', test: function (p) { return (p.looseVideos || []).length > 0 || (p.seasonFolders || []).some(function (f) { return f.videoCount === 1 || f.action === 'movies'; }); } }
     ].concat(COMMON_STATE)
   };
   var activeFilters = { movies: [], series: [] };
@@ -1776,7 +1778,16 @@
   }
   ['pagehide', 'viewbeforehide', 'viewhide'].forEach(function (ev) { page.addEventListener(ev, releaseBody); });
 
+  // the version Jellyfin has loaded (a stale cached page has no label at all: hard-refresh then)
+  function showVersion() {
+    ApiClient.getJSON(ApiClient.getUrl('Plugins')).then(function (list) {
+      var me = (list || []).filter(function (x) { return (x.Id || '').replace(/-/g, '') === PLUGIN_ID.replace(/-/g, ''); })[0];
+      $('#mcVersion').textContent = me ? 'v' + me.Version : '';
+    }).catch(function () {});
+  }
+
   page.addEventListener('pageshow', function () {
+    showVersion();
     themeBackground();
     stickyOffset();
     fitToContent();

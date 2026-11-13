@@ -431,6 +431,9 @@ public class CuratorService
     /// A container folder holds no videos itself, only 2+ subfolders with videos whose names look like separate
     /// shows (not "Season 1", "S2", "Specials", "OVA"…). Returns those subfolders, or null.
     /// </summary>
+    /// <summary>Subfolder names that hold a movie, not a season ("The Movie", "劇場版", "Gekijouban").</summary>
+    private static readonly Regex MovieLike = new(@"\b(the movie|movie|film|gekijou?ban)\b|劇場版|剧场版", RegexOptions.IgnoreCase);
+
     private static int VideoCount(string dir) => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(IsVideo);
 
     /// <summary>Each season is its own show (default) instead of season folders inside one show.</summary>
@@ -1376,9 +1379,12 @@ public class CuratorService
                 var inSub = rawEps.Where(e => IsUnder(e.Path, sub)).ToList();
                 var fs = FolderSeason(sub, inSub);
                 var rule = FolderRuleFor(sub);
-                var action = rule?.Action == "show"
-                    || (Flat && rule == null && !ExtrasLike.IsMatch(System.IO.Path.GetFileName(sub).Trim()) && VideoCount(sub) >= 2)
-                    ? "show" : "season";
+                var subName = System.IO.Path.GetFileName(sub).Trim();
+                var action = rule?.Action is "show" or "movies" ? rule.Action
+                    : rule != null ? "season"
+                    : VideoCount(sub) == 1 && MovieLike.IsMatch(subName) ? "movies"
+                    : Flat && !ExtrasLike.IsMatch(subName) && VideoCount(sub) >= 2 ? "show"
+                    : "season";
                 subSeasons[sub] = fs;
                 p.SeasonFolders.Add(new SeasonFolderInfo
                 {
@@ -1394,9 +1400,20 @@ public class CuratorService
                     var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mDir)!, FlattenName(System.IO.Path.GetFileName(mDir), System.IO.Path.GetFileName(sub)));
                     Move(p, ctx, sub, target, "dirmove", "flatten");
                 }
+                else if (action == "movies" && moviesRoot != null)
+                {
+                    // a movie kept in its own subfolder ("5. Shakugan no Shana: The Movie/"): the whole folder goes to Movies
+                    excludedDirs.Add(sub);
+                    var name = Safe(CleanName(Regex.Replace(subName, @"^\d+\s*[.\-_)]\s*", string.Empty)));
+                    Move(p, ctx, sub, System.IO.Path.Combine(moviesRoot, name), "dirmove", "to Movies library");
+                }
+                else if (action == "movies")
+                {
+                    p.Warnings.Add("No Movies library found to move videos into.");
+                }
             }
 
-            if (p.SeasonFolders.Count < 2 && members.Count == 1)
+            if (p.SeasonFolders.Count < 2 && members.Count == 1 && !p.SeasonFolders.Any(f => f.Action == "movies"))
             {
                 p.SeasonFolders.Clear(); // a single subfolder isn't worth a panel
             }
@@ -1664,7 +1681,8 @@ public class CuratorService
         }
 
         Config.FolderRules.RemoveAll(r => r.Path == path);
-        var automatic = (action == "season" && season == null) || action == "leave";
+        // "season" is kept even without a number: it overrides an automatic "separate show" / "movie" default
+        var automatic = action == "leave";
         if (!automatic)
         {
             Config.FolderRules.Add(new FolderRule { Path = path, Action = action, Season = season });
