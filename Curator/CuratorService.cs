@@ -2052,6 +2052,7 @@ public class CuratorService
         var destDirs = new HashSet<string>(StringComparer.Ordinal);
         // season folders with their own title (grouped show): renamed in place to the title, episodes "<title> - 01"
         var titled = new Dictionary<string, (string Title, int Season)>(StringComparer.Ordinal);
+        var grouped = GroupedShow(dir);
 
         foreach (var (srcDir, e, season) in numbered)
         {
@@ -2082,7 +2083,12 @@ public class CuratorService
             var epTpl = episodeTpl;
             var top = IsUnder(e.Path, dir) && System.IO.Path.GetDirectoryName(e.Path) != dir
                 ? System.IO.Path.Combine(dir, System.IO.Path.GetRelativePath(dir, e.Path).Split('/')[0]) : null;
-            if (seasonFolders && top != null && FolderRuleFor(top)?.Title is { Length: > 0 } own)
+            // grouped show: every season folder you kept has a title - yours, else its current folder name (never "Season N")
+            var own = top == null ? null
+                : FolderRuleFor(top)?.Title is { Length: > 0 } typed ? typed
+                : grouped && FolderRuleFor(top)?.Action == "season" ? OrderPrefix.Replace(System.IO.Path.GetFileName(top), string.Empty).Trim()
+                : null;
+            if (seasonFolders && top != null && !string.IsNullOrEmpty(own))
             {
                 // stays in its folder (renamed after the loop); its episodes are named after the season's own title
                 titled[top] = (own, season);

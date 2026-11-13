@@ -161,6 +161,7 @@
       <button is="emby-button" type="button" class="raised mc-btn button-submit" id="mcTabMovies"><span>Movies</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcTabSeries"><span>Series</span></button>
       <span class="mc-push"></span>
+      <button is="emby-button" type="button" class="raised mc-btn button-submit" id="mcUpdate" hidden title="Install the newer Movie Curator from your plugin repositories, then restart Jellyfin"><span>⬆ Update</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo" title="Folder change history: undo or rewind"><span>🕘 History / undo</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcScan" title="Scan the libraries so Jellyfin picks up moved folders"><span>⟳ Scan library</span></button>
       <button is="emby-button" type="button" class="raised mc-btn mc-icon" id="mcRefresh" title="Reload the list" aria-label="Reload the list"><span aria-hidden="true">↻</span></button>
@@ -617,7 +618,7 @@
     b.push(btn('trash', '🗑 Delete', 'Delete it: moves to _curator_trash next to the library on Move folders (undo brings it back)'));
     if (series && kind === 'dir' && depth === 1 && a === 'stay') {
       b.push('<input class="mc-text mc-node-season" type="number" min="0" max="99" placeholder="S#" title="Season number of this folder (its order)" value="' + (node.season != null ? node.season : '') + '">');
-      b.push('<input class="mc-text mc-node-title" placeholder="Season title" title="Its own title, e.g. &quot;Himouto! Umaru-chan S&quot;: ✏ Rename files names the folder &quot;S#. title&quot; and its episodes &quot;title - 01&quot;" value="' + esc(node.title || '') + '">');
+      b.push('<input class="mc-text mc-node-title" placeholder="' + esc(node.name.replace(/^\d+\s*[.\-_)]\s*/, '')) + '" title="Its own title, e.g. &quot;Himouto! Umaru-chan S&quot;: ✏ Rename files names the folder &quot;S#. title&quot; and its episodes &quot;title - 01&quot;" value="' + esc(node.title || '') + '">');
     }
     if (series && kind === 'file') {
       b.push('<input class="mc-text mc-node-ep" type="number" min="0" max="9999" placeholder="E#" title="Episode number' +
@@ -2203,12 +2204,59 @@
   ['pagehide', 'viewbeforehide', 'viewhide'].forEach(function (ev) { page.addEventListener(ev, releaseBody); });
 
   // the version Jellyfin has loaded (a stale cached page has no label at all: hard-refresh then)
+  // ---------------------------------------------------------------- update (from the plugin repositories you added)
+  var PLUGIN_NAME = 'Movie Curator', newest = null;
+  function cmpVersion(a, b) {
+    var x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) { var d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
+    return 0;
+  }
   function showVersion() {
     ApiClient.getJSON(ApiClient.getUrl('Plugins')).then(function (list) {
       var me = (list || []).filter(function (x) { return (x.Id || '').replace(/-/g, '') === PLUGIN_ID.replace(/-/g, ''); })[0];
       $('#mcVersion').textContent = me ? 'v' + me.Version : '';
+      if (me) checkUpdate(me.Version);
     }).catch(function () {});
   }
+  function checkUpdate(installed) {
+    ApiClient.getJSON(ApiClient.getUrl('Packages/' + encodeURIComponent(PLUGIN_NAME), { assemblyGuid: PLUGIN_ID })).then(function (pkg) {
+      var versions = ((pkg && (pkg.versions || pkg.Versions)) || []).map(function (v) {
+        return { version: v.version || v.Version, repositoryUrl: v.repositoryUrl || v.RepositoryUrl, changelog: v.changelog || v.Changelog };
+      }).filter(function (v) { return v.version; });
+      newest = versions.filter(function (v) { return cmpVersion(v.version, installed) > 0; })
+        .sort(function (a, b) { return cmpVersion(b.version, a.version); })[0] || null;
+      var b = $('#mcUpdate');
+      b.hidden = !newest;
+      if (newest) {
+        b.querySelector('span').textContent = '⬆ Update to v' + newest.version;
+        b.title = 'Install v' + newest.version + ' (you have v' + installed + ')' + (newest.changelog ? ':\n' + newest.changelog : '') + '\nThen restart Jellyfin.';
+      }
+      $('#mcVersion').title = newest ? 'v' + newest.version + ' is available' : 'Up to date';
+    }).catch(function () { /* no repository info: no button */ });
+  }
+  $('#mcUpdate').addEventListener('click', function () {
+    if (!newest) return;
+    var v = newest;
+    if (!confirm('Install Movie Curator v' + v.version + '?\nJellyfin needs a restart afterwards to load it.')) return;
+    progress('#mcProgress', { text: 'Installing v' + v.version + '…' });
+    ApiClient.ajax({
+      type: 'POST',
+      url: ApiClient.getUrl('Packages/Installed/' + encodeURIComponent(PLUGIN_NAME), { assemblyGuid: PLUGIN_ID, version: v.version, repositoryUrl: v.repositoryUrl })
+    }).then(function () {
+      // the install runs in the background; give it a moment, then offer the restart
+      return new Promise(function (ok) { setTimeout(ok, 4000); });
+    }).then(function () {
+      return api('GET', 'Jobs').catch(function () { return []; });
+    }).then(function (jobs) {
+      progress('#mcProgress', null);
+      var running = (jobs || []).filter(function (j) { return !j.finished; });
+      var warn = running.length ? '\n\n⚠ ' + running.length + ' curator job(s) still running: a restart stops them (finished items stay done).' : '';
+      if (!confirm('v' + v.version + ' is installed. Restart Jellyfin now to load it?' + warn + '\n\n(Cancel = restart later yourself.)')) return;
+      return ApiClient.restartServer().then(function () {
+        Dashboard.alert('Jellyfin is restarting. Reload this page in a minute (Ctrl+Shift+R).');
+      });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Update failed: ' + (e && e.message || e)); });
+  });
 
   page.addEventListener('pageshow', function () {
     showVersion();
