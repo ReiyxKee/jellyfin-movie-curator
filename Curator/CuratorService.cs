@@ -836,6 +836,104 @@ public class CuratorService
         public HashSet<string> Taken { get; } = new(StringComparer.Ordinal);
 
         public bool IsTaken(string p) => Taken.Contains(p) || File.Exists(p) || Directory.Exists(p);
+
+        /// <summary>Episode numbers read from file names, for episodes Jellyfin couldn't number (path -> number).</summary>
+        public Dictionary<string, int> EpNo { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>Jellyfin's episode number, else the one read from the file name.</summary>
+    private static int? EpNumber(Ctx ctx, Episode e) => e.IndexNumber ?? (ctx.EpNo.TryGetValue(e.Path ?? string.Empty, out var n) ? n : null);
+
+    private static readonly Regex EpMarker = new(
+        @"\bS\d{1,2}\s*E(?<n>\d{1,4})(?!\d)|\bEp?(?:isode)?\.?\s*(?<n>\d{1,4})(?!\d)|#(?<n>\d{1,4})(?!\d)"
+        + @"|第\s*(?<n>\d{1,4})\s*[話话集章回]|(?:OVA|OAD)\s*-?\s*(?<n>\d{1,3})(?!\d)",
+        RegexOptions.IgnoreCase);
+
+    /// <summary>Bonus clips (creditless OP/ED, specials, promos): never given an episode number from the name.</summary>
+    private static readonly Regex EpBonus = new(
+        @"\b(?:NC)?(?:OP|ED)\s*\d*\b|\bNC\b|\b(?:SP|PV|CM|Menu|Preview|Trailer|Teaser|Special|Extra)s?\s*\d*\b",
+        RegexOptions.IgnoreCase);
+
+    private static readonly Regex EpNoise = new(
+        @"\[[^\]]*\]|\((?!\s*\d{1,4}\s*\))[^)]*\)|【[^】]*】|(?i)\b(\d{3,4}p|[xh]\.?26[45]|hevc|avc|av1|10-?bit|hi10p?|flac|aac\d?(\.\d)?|ddp?\d(\.\d)?|bd(rip)?|web(-?dl|rip)?|dual[- ]audio)\b");
+
+    /// <summary>
+    /// Fills <see cref="Ctx.EpNo"/> for episodes without a Jellyfin number, from their file names
+    /// ("[Hakata-ramen] City Hunter 2 01 [1080p].mkv" -> 1). Per folder: the text all files share at the start
+    /// (the show title, "City Hunter 2") is ignored, then an "E01" / "第01話" / " - 01" marker or the first plain
+    /// number is the episode. A folder whose numbers would collide is left alone.
+    /// </summary>
+    private static void FillEpisodeNumbers(Ctx ctx, IEnumerable<Episode> episodes)
+    {
+        foreach (var folder in episodes.Where(e => !string.IsNullOrEmpty(e.Path)).GroupBy(e => System.IO.Path.GetDirectoryName(e.Path)!))
+        {
+            var clean = folder.ToDictionary(
+                e => e.Path!,
+                e => CleanSpaces(Regex.Replace(EpNoise.Replace(System.IO.Path.GetFileNameWithoutExtension(e.Path!), " "), @"[._]+", " ")),
+                StringComparer.Ordinal);
+            var prefix = clean.Count >= 2 ? CommonWordPrefix(clean.Values.ToList()) : string.Empty;
+            var parsed = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var e in folder.Where(e => e.IndexNumber == null))
+            {
+                var rest = clean[e.Path!];
+                rest = rest.Length > prefix.Length ? rest.Substring(prefix.Length) : rest;
+                var m = EpMarker.Match(rest);
+                if (!m.Success)
+                {
+                    // a plain number only counts in a folder of several files (whose shared title was cut off above),
+                    // and not for bonus clips or a season tag ("S2")
+                    if (clean.Count < 2 || EpBonus.IsMatch(rest))
+                    {
+                        continue;
+                    }
+
+                    m = Regex.Match(rest, @"(?<![\d.])(?<!\bS)(?<n>\d{1,4})(?![\d.])", RegexOptions.IgnoreCase);
+                }
+
+                var v = m.Groups["n"].Value;
+                if (m.Success && int.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+                    && n > 0 && !(v.Length == 4 && n is >= 1900 and <= 2099))
+                {
+                    parsed[e.Path!] = n;
+                }
+            }
+
+            // only trust the result when every number in the folder (Jellyfin's and ours) is distinct
+            var all = folder.Where(e => e.IndexNumber != null).Select(e => e.IndexNumber!.Value).Concat(parsed.Values).ToList();
+            if (all.Count == all.Distinct().Count())
+            {
+                foreach (var kv in parsed)
+                {
+                    ctx.EpNo[kv.Key] = kv.Value;
+                }
+            }
+        }
+    }
+
+    /// <summary>Longest start shared by all names, cut back to a whole word ("City Hunter 2 0" -> "City Hunter 2 ").</summary>
+    private static string CommonWordPrefix(List<string> names)
+    {
+        var a = names[0];
+        var len = a.Length;
+        foreach (var b in names.Skip(1))
+        {
+            var i = 0;
+            while (i < len && i < b.Length && char.ToLowerInvariant(a[i]) == char.ToLowerInvariant(b[i]))
+            {
+                i++;
+            }
+
+            len = i;
+        }
+
+        var cut = a.Substring(0, len);
+        if (len < a.Length && !char.IsWhiteSpace(a[len]) && a[len] != '-')
+        {
+            var sp = cut.LastIndexOfAny(new[] { ' ', '-' });
+            cut = sp >= 0 ? cut.Substring(0, sp + 1) : string.Empty;
+        }
+
+        return cut;
     }
 
     private HashSet<string> LibraryRoots() => _library.GetVirtualFolders()
@@ -1341,6 +1439,7 @@ public class CuratorService
         var names = SeriesNames(s);
         var ids = Ids(s);
         var allEpisodes = members.SelectMany(m => episodesBySeries.GetValueOrDefault(m.Id) ?? new List<Episode>()).ToList();
+        FillEpisodeNumbers(ctx, allEpisodes);
         var p = new ItemPlan
         {
             Kind = "series",
@@ -1576,7 +1675,7 @@ public class CuratorService
 
             // unnumbered videos directly in the series folder (movies / specials): leave, or move to the Movies library
             var excludedFiles = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && e.IndexNumber == null))
+            foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && EpNumber(ctx, e) == null))
             {
                 var action = FolderRuleFor(e.Path)?.Action == "movies" ? "movies" : "leave";
                 p.LooseVideos.Add(new LooseVideoInfo { Path = e.Path, Action = action });
@@ -1670,7 +1769,7 @@ public class CuratorService
         }
         var episodeTpl = Flat ? Or(Config.FlatEpisodeTemplate, "{title} - {episode:00}") : Or(Config.EpisodeTemplate, DefaultEpisodeFile);
         var all = sources.SelectMany(x => x.Episodes.Select(e => (x.Dir, e.Episode, e.Season))).ToList();
-        var numbered = all.Where(x => x.Episode.IndexNumber.HasValue && IsUnder(x.Episode.Path, x.Dir)).ToList();
+        var numbered = all.Where(x => EpNumber(ctx, x.Episode).HasValue && IsUnder(x.Episode.Path, x.Dir)).ToList();
         p.EpisodesSkipped = all.Count - numbered.Count;
         if (p.EpisodesSkipped > 0)
         {
@@ -1682,7 +1781,7 @@ public class CuratorService
         // season+episode, would give wrong or colliding names. Leave the episodes of such a show alone.
         var mergedSeasons = numbered.GroupBy(x => x.Season)
             .Where(g => g.Select(x => x.Episode.SeasonId).Distinct().Count() > 1).Select(g => g.Key).ToList();
-        var duplicates = numbered.GroupBy(x => (x.Season, x.Episode.IndexNumber)).Count(g => g.Count() > 1);
+        var duplicates = numbered.GroupBy(x => (x.Season, EpNumber(ctx, x.Episode))).Count(g => g.Count() > 1);
         if (mergedSeasons.Count > 0 || duplicates > 0)
         {
             p.SeasonConflict = true;
@@ -1693,13 +1792,13 @@ public class CuratorService
             return;
         }
 
-        var pad = numbered.Any(x => (x.Episode.IndexNumberEnd ?? x.Episode.IndexNumber) >= 100) ? "000" : "00";
+        var pad = numbered.Any(x => (x.Episode.IndexNumberEnd ?? EpNumber(ctx, x.Episode)) >= 100) ? "000" : "00";
         var moved = new HashSet<string>(StringComparer.Ordinal);
         var destDirs = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (srcDir, e, season) in numbered)
         {
-            var number = e.IndexNumber!.Value;
+            var number = EpNumber(ctx, e)!.Value;
             var end = e.IndexNumberEnd is int x && x > number ? x : (int?)null;
             var tokens = ItemTokens(s);
             tokens["series"] = seriesFolder;
