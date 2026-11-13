@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.18",
+        "changelog": "[experimental] - Grouped shows: titled season folders 'S#. title', episodes 'title - 01', season.nfo'\n- Refresh only the touched rows; search waits for typing to pause\n- Rename files keeps season folders for grouped shows; clean season names",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.18/movie-curator_1.1.0-exp.18.zip",
+        "checksum": "6ccdbbfea1b7a39c7cf74acc9ad2e4f5",
+        "timestamp": "2026-11-13T19:13:13Z"
+      },
+      {
         "version": "1.1.0.17",
         "changelog": "[experimental] - fixed group subrows are hidden\n- Notes open as a list under the row",
         "targetAbi": "10.11.0.0",
