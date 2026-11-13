@@ -1656,9 +1656,10 @@ public class CuratorService
         }
 
         // "group with": the whole show folder moves into another show's folder (nothing else changes this run)
-        if (FolderRuleFor(dir) is { Action: "into", Target: { } intoDir } && Directory.Exists(intoDir) && !IsUnder(intoDir, dir))
+        if (FolderRuleFor(dir) is { Action: "into", Target: { } intoDir } && NewOrExistingDir(intoDir) && !IsUnder(intoDir, dir))
         {
             var grouped = System.IO.Path.Combine(intoDir, System.IO.Path.GetFileName(dir));
+            MkDirs(p, ctx, intoDir); // "group into new folder": created here (logged, so undo removes it)
             Move(p, ctx, dir, grouped, "dirmove", "group with");
             p.FinalPath = grouped;
             p.Warnings.Add($"Moves into {System.IO.Path.GetFileName(intoDir)}/ (group with). After the scan it shows up there as a subfolder.");
@@ -2161,6 +2162,10 @@ public class CuratorService
         return System.IO.Path.Combine(drive, "_curator_trash", System.IO.Path.GetRelativePath(drive, path));
     }
 
+    /// <summary>A folder that exists, or a new one whose parent exists ("group into new folder").</summary>
+    private static bool NewOrExistingDir(string path) =>
+        Directory.Exists(path) || (System.IO.Path.GetDirectoryName(path) is { } parent && Directory.Exists(parent));
+
     private static readonly Regex OrderPrefix = new(@"^\d+\s*[.\-_)]\s*");
 
     /// <summary>
@@ -2192,7 +2197,7 @@ public class CuratorService
                 "up" => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(parent)!, name),
                 "trash" => TrashFor(r.Path, libraryRoot),
                 "show" => System.IO.Path.Combine(libraryRoot, name),
-                "into" => string.IsNullOrEmpty(r.Target) || !Directory.Exists(r.Target) || IsUnder(r.Target, r.Path) ? null
+                "into" => string.IsNullOrEmpty(r.Target) || !NewOrExistingDir(r.Target) || IsUnder(r.Target, r.Path) ? null
                     : System.IO.Path.Combine(r.Target, name),
                 "extras" => specials != null
                     ? System.IO.Path.Combine(specials, Safe(ownerName), System.IO.Path.GetRelativePath(itemDir, r.Path))
@@ -2336,7 +2341,7 @@ public class CuratorService
         }
 
         target = target?.TrimEnd('/');
-        if (action == "into" && (string.IsNullOrEmpty(target) || !Directory.Exists(target) || !roots.Any(r => IsUnder(target, r))
+        if (action == "into" && (string.IsNullOrEmpty(target) || !NewOrExistingDir(target) || !roots.Any(r => IsUnder(target, r))
             || target == path || IsUnder(target, path)))
         {
             return false;

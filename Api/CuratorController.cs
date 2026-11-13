@@ -72,6 +72,13 @@ public class SeasonNameRequest
     [JsonPropertyName("name")] public string? Name { get; set; }
 }
 
+public class CollectionRemoveRequest
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("itemIds")] public List<string> ItemIds { get; set; } = new();
+}
+
 public class CollectionRequest
 {
     [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
@@ -232,6 +239,31 @@ public class CuratorController : ControllerBase
     /// Group shows (e.g. the seasons of one franchise in the flat layout) or movies into a Jellyfin collection.
     /// An existing collection with that name is reused. Returns the collection's id.
     /// </summary>
+    [HttpPost("Collections/Remove")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<ActionResult> RemoveFromCollection([FromBody] CollectionRemoveRequest request)
+    {
+        var ids = request.ItemIds.Select(i => Guid.TryParse(i, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct().ToList();
+        var box = _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true })
+            .OfType<BoxSet>()
+            .FirstOrDefault(b => string.Equals(b.Name, request.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (box == null || ids.Count == 0)
+        {
+            return NotFound();
+        }
+
+        await _collections.RemoveFromCollectionAsync(box.Id, ids).ConfigureAwait(false);
+        _logger.LogInformation("Curator: removed {Count} item(s) from collection {Name}", ids.Count, box.Name);
+        if (_library.GetItemById(box.Id) is BoxSet left && !left.GetLinkedChildren().Any())
+        {
+            // nothing left in it: the collection goes too
+            _library.DeleteItem(left, new DeleteOptions { DeleteFileLocation = true });
+            _logger.LogInformation("Curator: deleted the now empty collection {Name}", box.Name);
+        }
+
+        return NoContent();
+    }
+
     [HttpPost("Collections")]
     public async Task<ActionResult<string>> AddToCollection([FromBody] CollectionRequest request)
     {

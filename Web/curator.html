@@ -87,6 +87,8 @@
   #MovieCuratorPage select.mc-text { background-color: var(--mc-bg); }
   #MovieCuratorPage select.mc-text option { background-color: var(--mc-bg); color: inherit; }
   #MovieCuratorPage .mc-title-link { color: inherit; text-decoration: none; }
+  #MovieCuratorPage .mc-coll-x { cursor: pointer; margin-left: .2em; opacity: .7; }
+  #MovieCuratorPage .mc-coll-x:hover { opacity: 1; }
   #MovieCuratorPage .mc-title-link:hover { text-decoration: underline; }
   #MovieCuratorPage .mc-node-play { font-size: .95em; padding: .1em .55em; line-height: 1.2; }
   #MovieCuratorPage .mc-node-btn.on { border-color: #00a4dc; background: rgba(0,164,220,.28); }
@@ -167,6 +169,7 @@
       <button is="emby-button" type="button" class="raised mc-btn" id="mcMoveUp" title="Only move the selected nested movies / shows / seasons up to the library root: no renames, no NFOs"><span>📤 Move up</span></button>
       <button is="emby-button" type="button" class="raised mc-btn button-submit" id="mcMoveFolders" title="Put the selected items' folders and videos where the tree says (new folders, up, Specials, Movies, group with): nothing is renamed"><span>📁 Move folders</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcRenameFiles" title="Rename the selected items' folders and files by the naming rules (plus NFOs / titles): nothing changes place"><span>✏ Rename files</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn mc-series-only" id="mcGroupNew" title="Make a new folder and move the selected shows into it (on 📁 Move folders)"><span>📁 Group into new folder…</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcCombine" title="Treat the selected series folders as one show (merged as seasons)"><span>🔗 Combine selected</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcVerifySel" title="Confirm the current match of the selected items"><span>✓ Mark verified</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnverifySel" title="Remove the ✓ verified mark from the selected items"><span>Unmark verified</span></button>
@@ -574,7 +577,11 @@
   /** Top-level show folders, for "Group with". */
   function groupTargets(node) {
     if (type !== 'series') return [];
-    return plans.map(function (p) { return p.treeRoot; }).filter(function (r) {
+    var pending = [];
+    plans.forEach(function (p) {
+      (p.ops || []).forEach(function (o) { if (o.note === 'group with') pending.push(o.to.split('/').slice(0, -1).join('/')); });
+    });
+    return plans.map(function (p) { return p.treeRoot; }).concat(pending).filter(function (r, i, all) { return all.indexOf(r) === i; }).filter(function (r) {
       return r && r !== node.path && r.indexOf(node.path + '/') !== 0 && node.path.indexOf(r + '/') !== 0;
     }).sort(function (a, b) { return a.localeCompare(b); });
   }
@@ -715,7 +722,10 @@
     if (p.detached) tags.push('<span class="mc-tag">detached</span>');
     if (p.empty) tags.push('<span class="mc-tag warn">🗑 empty</span>');
     if (p.warnings.length) tags.push('<span class="mc-tag warn" title="' + esc(p.warnings.join('\n')) + '">⚠ ' + p.warnings.length + ' note' + (p.warnings.length > 1 ? 's' : '') + '</span>');
-    (p.collections || []).forEach(function (c) { tags.push('<span class="mc-tag info" title="In the Jellyfin collection ' + esc(c) + '">📚 ' + esc(c) + '</span>'); });
+    (p.collections || []).forEach(function (c) {
+      tags.push('<span class="mc-tag info" title="In the Jellyfin collection ' + esc(c) + '">📚 ' + esc(c) +
+        ' <a class="mc-coll-x" data-coll="' + esc(c) + '" title="Remove it from this collection">✕</a></span>');
+    });
     if (p.kind === 'series' && (p.seasons || []).length > 1) tags.push('<span class="mc-tag">📚 ' + p.seasons.length + ' seasons</span>');
     var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
     var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
@@ -874,6 +884,7 @@
     };
     act('#mcBatchIdentify', '🔍 Identify', n);
     act('#mcMoveUp', '📤 Move up', count(movesUp));
+    act('#mcGroupNew', '📁 Group into new folder…', type === 'series' ? count(function (p) { return !!p.treeRoot; }) : 0);
     act('#mcMoveFolders', '📁 Move folders', count(function (p) { return p.ops.some(placeOp); }));
     act('#mcRenameFiles', '✏ Rename files', count(function (p) { return p.ops.some(function (o) { return !placeOp(o) && o.kind !== 'mkdir'; }); }));
     var toCollection = collectionMode();
@@ -1870,6 +1881,24 @@
   var PLACE_NOTES = ['flatten', 'if empty after flatten', 'group with', 'to Specials', 'to Movies library', 'extras', 'merged into extras', 'to curator trash', 'empty show', 'to trash'];
   function placeOp(o) { return PLACE_NOTES.indexOf(o.note) >= 0; }
   $('#mcMoveFolders').addEventListener('click', function () { applyFolders('move'); });
+  $('#mcGroupNew').addEventListener('click', function () {
+    var rows = selectedIds().map(planById).filter(function (p) { return p.treeRoot && p.root; });
+    if (!rows.length) return;
+    var name = prompt('Name of the new folder (the ' + noun(rows.length) + ' move into it on 📁 Move folders):',
+      commonTitle(rows.map(function (p) { return p.jellyfinName; })));
+    name = (name || '').replace(/[\/\\]/g, '-').replace(/[:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
+    if (!name) return;
+    var target = rows[0].root + '/' + name;
+    if (rows.some(function (p) { return p.treeRoot === target; })) { Dashboard.alert('One of the selected shows already is that folder: pick another name.'); return; }
+    rows.reduce(function (chain, p) {
+      return chain.then(function () { return api('POST', 'FolderRule', { path: p.treeRoot, action: 'into', target: target }); });
+    }, Promise.resolve()).then(function () {
+      selected = {};
+      return load();
+    }).then(function () {
+      Dashboard.alert(noun(rows.length) + ' will move into "' + name + '/" on 📁 Move folders (select them and press it). Undo: 🕘 History.');
+    }).catch(function (e) { Dashboard.alert('Could not plan it: ' + e.message); load(); });
+  });
   $('#mcRenameFiles').addEventListener('click', function () { applyFolders('rename'); });
   function applyFolders(mode) {
     var test = mode === 'move' ? placeOp : function (o) { return !placeOp(o) && o.kind !== 'mkdir'; };
@@ -2024,6 +2053,15 @@
     var id = rowEl.getAttribute('data-id'), p = planById(id);
     if (e.target.closest('.mc-root-files') && p) { openFolder(p.treeRoot, id); return; }
     if (e.target.closest('.mc-row-play') && p) { playHere(p.itemId); return; }
+    var cx = e.target.closest('.mc-coll-x');
+    if (cx && p) {
+      var coll = cx.getAttribute('data-coll');
+      if (!confirm('Remove "' + p.jellyfinName + '" from the collection "' + coll + '"?\n(The collection is deleted when nothing is left in it. No files change.)')) return;
+      var ids = (p.members && p.members.length ? p.members.map(function (m) { return m.itemId; }) : []).concat([p.itemId]);
+      api('POST', 'Collections/Remove', { name: coll, itemIds: ids }).then(load)
+        .catch(function (err) { Dashboard.alert('Could not remove it: ' + err.message); });
+      return;
+    }
     if (e.target.closest('.mc-root-trash') && p) {
       var target = p.kind === 'series' ? p.treeRoot : (p.treeRoot || p.path);
       if (!rowTrashed(p) && !confirm('Delete "' + p.jellyfinName + '"?\n\nOn 📁 Move folders it moves to _curator_trash next to the library (undo in 🕘 History brings it back). Empty that folder yourself when sure.')) return;
