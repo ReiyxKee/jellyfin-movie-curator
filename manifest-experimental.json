@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.2",
+        "changelog": "[experimental] - progress handler update\n- Added rollback history",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.2/movie-curator_1.1.0-exp.2.zip",
+        "checksum": "08f74921c2c33de299ba40f39926abc2",
+        "timestamp": "2026-11-13T05:12:47Z"
+      },
+      {
         "version": "1.1.0.1",
         "changelog": "[experimental] - Added experiment track for dev builds\n- setup build/release manufest\n- Updated grouping mechanism\n- Bugfixes on the UI\n- background progress and cancel\n- cache batch fetched result\n- Added Loading Bar\n- Updated Grouping UI for Series\n- Flatten Series Grouping / Handling\n- Update batch identify\n- UI Update\n- Auto mark correct when a manual apply is done\n- added checkbox\n- Updated resolving of sus listing\n- Updated the UI and Query Mode\n- Updated git ignore",
         "targetAbi": "10.11.0.0",
