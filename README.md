@@ -25,6 +25,19 @@ Library locations come from Jellyfin itself, so it works with whatever paths you
 
 ## Install
 
+### From the plugin repository (recommended)
+
+1. Jellyfin → **Dashboard → Plugins → Repositories → +**
+   - Name: `Movie Curator`
+   - URL: `https://raw.githubusercontent.com/ReiyxKee/jellyfin-movie-curator/main/manifest.json`
+2. **Catalog → Movie Curator → Install**, then restart Jellyfin.
+3. Updates show up in Jellyfin when a new version is released (or install automatically with auto-update on).
+
+If you installed it by hand before, delete that folder from `<jellyfin config>/plugins/` first.
+
+### Manually
+
+
 Build it (see below), copy `dist/MovieCurator_<version>/` into `<jellyfin config>/plugins/`, then restart Jellyfin.
 
 ## Use
@@ -125,3 +138,13 @@ Movie Curator is free software: you can redistribute it and/or modify it under t
 
 This plugin is, and will always be, free for everyone. It is a non-commercial community project;
 please don't sell it. Any copy or modified version you share must stay open source under the same license.
+
+## Releasing (maintainers)
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+GitHub Actions builds the plugin, publishes a GitHub Release with the zip and adds the version to `manifest.json`
+(`.github/workflows/release.yml`). Every push to `main` is also compile-checked (`build.yml`). Versions must increase.
+

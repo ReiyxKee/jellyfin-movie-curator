@@ -1,0 +1,70 @@
+# Push a tag like v1.1.0:
+#   git tag v1.1.0 && git push origin v1.1.0
+# This builds the plugin, publishes a GitHub Release with the zip, and adds the version to manifest.json on main,
+# so Jellyfin (Dashboard -> Plugins -> Repositories) can install and update it.
+#
+# Test builds: a tag with a suffix, e.g. v1.2.0-beta.1, makes a GitHub *pre-release* with the zip but is NOT added to
+# manifest.json, so Jellyfin installs keep the last real release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: the changelog lists the commits since the previous tag
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Version from tag
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          case "$v" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV"; v="${v%%-*}";; *) echo "PRERELEASE=false" >> "$GITHUB_ENV";; esac
+          # Jellyfin wants four parts: 1.1 -> 1.1.0.0, 1.1.0 -> 1.1.0.0
+          while [ "$(echo "$v" | tr -cd . | wc -c)" -lt 3 ]; do v="$v.0"; done
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: >
+          dotnet publish Jellyfin.Plugin.MovieCurator.csproj -c Release -o bin/publish
+          -p:AssemblyVersion=$VERSION -p:FileVersion=$VERSION
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          cp bin/publish/Jellyfin.Plugin.MovieCurator.dll pkg/
+          python3 scripts/update_manifest.py meta "$VERSION" > pkg/meta.json
+          ZIP="movie-curator_${GITHUB_REF_NAME#v}.zip"
+          (cd pkg && zip -q "../$ZIP" ./*)
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP }}
+          generate_release_notes: true
+          prerelease: ${{ env.PRERELEASE == 'true' }}
+
+      - name: Update manifest.json on main
+        if: env.PRERELEASE != 'true'
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          python3 scripts/update_manifest.py manifest "$VERSION" "$ZIP" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ZIP}" "$GITHUB_REF_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "manifest: ${GITHUB_REF_NAME}" || { echo "manifest unchanged"; exit 0; }
+          git push origin main
