@@ -57,6 +57,12 @@
   #MovieCuratorPage .mc-dock .mc-progress-track { flex: 0 0 9em; }
   #MovieCuratorPage .mc-dock-title { font-size: .82em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
   #MovieCuratorPage .mc-filters > summary.mc-active { border-color: #00a4dc; }
+  /* the filter list never runs off the window (it scrolls itself), and an empty list still leaves room under it */
+  #MovieCuratorPage .mc-filters .mc-sources-list { max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; }
+  #MovieCuratorPage #mcList { min-height: 60vh; }
+  #MovieCuratorPage .mc-filter-top { position: sticky; top: -.5em; display: flex; justify-content: space-between; align-items: center; gap: 1em;
+    margin: -.5em -.7em .2em; padding: .45em .7em; background: var(--mc-bg); border-bottom: 1px solid var(--mc-line); font-size: .8em; opacity: .9; }
+  #MovieCuratorPage .mc-filter-top .mc-dim { opacity: .35; cursor: default; pointer-events: none; }
   #MovieCuratorPage .mc-filters .mc-sources-list h4 { margin: .4em 0 .15em; font-size: .75em; text-transform: uppercase; opacity: .6; letter-spacing: .04em; }
   #MovieCuratorPage .mc-icon { font-size: 1.1em; line-height: 1; padding: .3em .55em; }
   #MovieCuratorPage .mc-push { margin-left: auto; }
@@ -629,12 +635,14 @@
     var details = $('#mcFilterMenu details'), wasOpen = details && details.open;
     $('#mcFilterMenu').innerHTML = '<details class="mc-sources mc-filters"><summary class="' + (on.length ? 'mc-active' : '') + '">Filters' +
       (on.length ? ' (' + on.length + ')' : '') + ' ▾</summary><div class="mc-sources-list">' +
+      '<div class="mc-filter-top"><span>' + (on.length ? on.length + ' active' : 'No filters on') + '</span>' +
+      '<a class="mc-link mc-filter-clear' + (on.length ? '' : ' mc-dim') + '" title="Turn all filters off">Reset</a></div>' +
       defs.map(function (d) {
         var head = d.group !== lastGroup ? '<h4>' + esc(d.group) + '</h4>' : '';
         lastGroup = d.group;
         return head + '<label><input type="checkbox" class="mc-filter" value="' + d.key + '"' + (on.indexOf(d.key) >= 0 ? ' checked' : '') + '> ' + esc(d.label) + '</label>';
       }).join('') +
-      (on.length ? '<div style="margin-top:.4em"><a class="mc-link mc-filter-clear">Clear filters</a></div>' : '') + '</div></details>';
+      '</div></details>';
     if (wasOpen) $('#mcFilterMenu details').open = true;
   }
   $('#mcFilterMenu').addEventListener('change', function (e) {
@@ -651,8 +659,15 @@
     renderFilterMenu();
     render();
   });
+  // fit the open filter list into the space left below it in the window
+  $('#mcFilterMenu').addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d.open) return;
+    var list = d.querySelector('.mc-sources-list');
+    list.style.maxHeight = Math.max(160, window.innerHeight - list.getBoundingClientRect().top - 12) + 'px';
+  }, true);
   $('#mcFilterMenu').addEventListener('click', function (e) {
-    if (!e.target.closest('.mc-filter-clear')) return;
+    if (!e.target.closest('.mc-filter-clear') || !activeFilters[type].length) return;
     activeFilters[type] = [];
     saveFilters();
     renderFilterMenu();
