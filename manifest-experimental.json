@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.10",
+        "changelog": "[experimental] - fixed dropdown cutoff",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.10/movie-curator_1.1.0-exp.10.zip",
+        "checksum": "fc5b7ac38a5fa537f0318a31d63a8a2f",
+        "timestamp": "2026-11-13T07:41:03Z"
+      },
+      {
         "version": "1.1.0.9",
         "changelog": "[experimental] - updated ui ux and wording",
         "targetAbi": "10.11.0.0",
