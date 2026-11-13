@@ -62,6 +62,9 @@ public class FolderRuleRequest
 
     /// <summary>"into": the show folder to move it into.</summary>
     [JsonPropertyName("target")] public string? Target { get; set; }
+
+    /// <summary>Its own title (a season folder in a grouped show; kept when a show is grouped).</summary>
+    [JsonPropertyName("title")] public string? Title { get; set; }
 }
 
 public class SeasonNameRequest
@@ -317,7 +320,7 @@ public class CuratorController : ControllerBase
     [HttpPost("FolderRule")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult SetFolderRule([FromBody] FolderRuleRequest request)
-        => _service.SetFolderRule(request.Path, request.Action, request.Season, request.Episode, request.Target)
+        => _service.SetFolderRule(request.Path, request.Action, request.Season, request.Episode, request.Target, request.Title)
             ? NoContent() : BadRequest("Path is not inside a library (or the 'group with' target is invalid).");
 
     /// <summary>A folder's subfolders and videos ("📂 Open" in the folder tree).</summary>

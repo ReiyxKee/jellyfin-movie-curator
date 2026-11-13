@@ -97,6 +97,7 @@
   #MovieCuratorPage .mc-node-play { font-size: .95em; padding: .1em .55em; line-height: 1.2; }
   #MovieCuratorPage .mc-node-btn.on { border-color: #00a4dc; background: rgba(0,164,220,.28); }
   #MovieCuratorPage .mc-node-season, #MovieCuratorPage .mc-node-ep { width: 4.4em; padding: .15em .3em; }
+  #MovieCuratorPage .mc-node-title { width: 14em; max-width: 100%; padding: .15em .3em; }
   #MovieCuratorPage .mc-node-into, #MovieCuratorPage .mc-root-into { max-width: 13em; padding: .15em .3em; }
   #MovieCuratorPage .mc-group { margin-top: .55em; border: 1px solid var(--mc-line); border-radius: 6px; overflow: hidden; }
   #MovieCuratorPage .mc-group-head { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; padding: .4em .6em; background: var(--mc-soft); font-size: .85em; }
@@ -615,7 +616,8 @@
     b.push(btn('stay', '• Stay', 'Keep it where it is'));
     b.push(btn('trash', '🗑 Delete', 'Delete it: moves to _curator_trash next to the library on Move folders (undo brings it back)'));
     if (series && kind === 'dir' && depth === 1 && a === 'stay') {
-      b.push('<input class="mc-text mc-node-season" type="number" min="0" max="99" placeholder="S#" title="Season number of this folder" value="' + (node.season != null ? node.season : '') + '">');
+      b.push('<input class="mc-text mc-node-season" type="number" min="0" max="99" placeholder="S#" title="Season number of this folder (its order)" value="' + (node.season != null ? node.season : '') + '">');
+      b.push('<input class="mc-text mc-node-title" placeholder="Season title" title="Its own title, e.g. &quot;Himouto! Umaru-chan S&quot;: ✏ Rename files names the folder &quot;S#. title&quot; and its episodes &quot;title - 01&quot;" value="' + esc(node.title || '') + '">');
     }
     if (series && kind === 'file') {
       b.push('<input class="mc-text mc-node-ep" type="number" min="0" max="9999" placeholder="E#" title="Episode number' +
@@ -708,11 +710,12 @@
     var n = el.closest('.mc-node'), rowEl = el.closest('.mc-row');
     if (!n || !rowEl) return null;
     var p = planById(rowEl.getAttribute('data-id')), path = n.getAttribute('data-path'), kind = n.getAttribute('data-kind');
-    var ep = n.querySelector('.mc-node-ep'), season = n.querySelector('.mc-node-season');
+    var ep = n.querySelector('.mc-node-ep'), season = n.querySelector('.mc-node-season'), title = n.querySelector('.mc-node-title');
     return {
       id: p && p.itemId, path: path, kind: kind,
       episode: ep && ep.value.trim() !== '' ? parseInt(ep.value, 10) : null,
-      season: season && season.value.trim() !== '' ? parseInt(season.value, 10) : null
+      season: season && season.value.trim() !== '' ? parseInt(season.value, 10) : null,
+      title: title ? title.value.trim() : null
     };
   }
 
@@ -1940,7 +1943,7 @@
     var target = rows[0].root + '/' + name;
     if (rows.some(function (p) { return p.treeRoot === target; })) { Dashboard.alert('One of the selected shows already is that folder: pick another name.'); return; }
     rows.reduce(function (chain, p) {
-      return chain.then(function () { return api('POST', 'FolderRule', { path: p.treeRoot, action: 'into', target: target }); });
+      return chain.then(function () { return api('POST', 'FolderRule', { path: p.treeRoot, action: 'into', target: target, title: p.jellyfinName }); });
     }, Promise.resolve()).then(function () {
       selected = {};
       return reloadRows(rows.map(function (r) { return r.itemId; }));
@@ -2128,22 +2131,22 @@
     if (!b) return;
     var act = b.getAttribute('data-act');
     if (act === 'stay') act = n.kind === 'file' ? 'leave' : 'stay';
-    saveNode({ path: n.path, action: act, season: act === 'stay' ? n.season : null, episode: n.episode });
+    saveNode({ path: n.path, action: act, season: act === 'stay' ? n.season : null, episode: n.episode, title: act === 'stay' ? n.title : null });
   });
   $('#mcList').addEventListener('change', function (e) {
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;
     var p = planById(rowEl.getAttribute('data-id'));
     if (e.target.classList.contains('mc-root-into') && p) {
-      saveNode(e.target.value ? { path: p.treeRoot, action: 'into', target: e.target.value } : { path: p.treeRoot, action: 'auto' });
+      saveNode(e.target.value ? { path: p.treeRoot, action: 'into', target: e.target.value, title: p.jellyfinName } : { path: p.treeRoot, action: 'auto' });
       return;
     }
     var n = nodeOf(e.target);
     if (!n) return;
     if (e.target.classList.contains('mc-node-into')) {
       saveNode(e.target.value ? { path: n.path, action: 'into', target: e.target.value, episode: n.episode } : { path: n.path, action: 'auto' });
-    } else if (e.target.classList.contains('mc-node-season')) {
-      saveNode({ path: n.path, action: 'stay', season: n.season });
+    } else if (e.target.classList.contains('mc-node-season') || e.target.classList.contains('mc-node-title')) {
+      saveNode({ path: n.path, action: 'stay', season: n.season, title: n.title });
     } else if (e.target.classList.contains('mc-node-ep')) {
       var cur = e.target.closest('.mc-node').querySelector('.mc-node-btn.on');
       var act = cur ? cur.getAttribute('data-act') : 'leave';

@@ -273,6 +273,9 @@ public class TreeNode
 
     [JsonPropertyName("target")] public string? Target { get; set; }
 
+    /// <summary>Its own title (season folder of a grouped show).</summary>
+    [JsonPropertyName("title")] public string? Title { get; set; }
+
     [JsonPropertyName("children")] public List<TreeNode> Children { get; set; } = new();
 }
 
@@ -1660,7 +1663,8 @@ public class CuratorService
                 .ToList();
         }
 
-        var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
+        // a grouped show (its season folders kept by you) keeps its own folder name; its seasons get theirs
+        var final = opt.Rename && !GroupedShow(dir) ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
         p.TreeRoot = dir;
 
@@ -2046,6 +2050,8 @@ public class CuratorService
         var pad = numbered.Any(x => (x.Episode.IndexNumberEnd ?? EpNumber(ctx, x.Episode)) >= 100) ? "000" : "00";
         var moved = new HashSet<string>(StringComparer.Ordinal);
         var destDirs = new HashSet<string>(StringComparer.Ordinal);
+        // season folders with their own title (grouped show): renamed in place to the title, episodes "<title> - 01"
+        var titled = new Dictionary<string, (string Title, int Season)>(StringComparer.Ordinal);
 
         foreach (var (srcDir, e, season) in numbered)
         {
@@ -2073,8 +2079,20 @@ public class CuratorService
 
             var seasonName = string.IsNullOrWhiteSpace(seasonTpl) ? string.Empty : Safe(Render(seasonTpl, tokens));
             var seasonDir = seasonName.Length == 0 ? dir : System.IO.Path.Combine(dir, seasonName);
+            var epTpl = episodeTpl;
+            var top = IsUnder(e.Path, dir) && System.IO.Path.GetDirectoryName(e.Path) != dir
+                ? System.IO.Path.Combine(dir, System.IO.Path.GetRelativePath(dir, e.Path).Split('/')[0]) : null;
+            if (seasonFolders && top != null && FolderRuleFor(top)?.Title is { Length: > 0 } own)
+            {
+                // stays in its folder (renamed after the loop); its episodes are named after the season's own title
+                titled[top] = (own, season);
+                seasonDir = System.IO.Path.GetDirectoryName(e.Path)!;
+                tokens["title"] = own;
+                epTpl = Or(Config.FlatEpisodeTemplate, "{title} - {episode:00}");
+            }
+
             destDirs.Add(seasonDir);
-            var newStem = renameFiles ? Safe(Render(episodeTpl, tokens)) : stem;
+            var newStem = renameFiles ? Safe(Render(epTpl, tokens)) : stem;
             if (newStem.Length == 0)
             {
                 continue;
@@ -2125,6 +2143,27 @@ public class CuratorService
             if (left > 0)
             {
                 p.Warnings.Add($"'{System.IO.Path.GetFileName(other.Dir)}' keeps {left} other file(s) (artwork, extras...), so that folder stays.");
+            }
+        }
+
+        // titled season folders: renamed to their title (after the episode renames inside them), plus a season.nfo
+        // with the season number - a titled folder has no "Season N" for Jellyfin to read the order from
+        if (renameFiles)
+        {
+            foreach (var (folder, info) in titled.OrderBy(k => k.Key, StringComparer.Ordinal))
+            {
+                // "2. Himouto! Umaru-chan S": the leading number is the season Jellyfin reads (and sorts the folders on disk)
+                var named = System.IO.Path.Combine(dir, Safe($"{info.Season}. {OrderPrefix.Replace(info.Title, string.Empty)}"));
+                if (named != folder)
+                {
+                    Move(p, ctx, folder, named, "dirmove");
+                }
+
+                var nfo = System.IO.Path.Combine(named, "season.nfo");
+                if (!File.Exists(System.IO.Path.Combine(folder, "season.nfo")))
+                {
+                    p.Ops.Add(new PlanOp { Kind = "nfo", To = nfo, Note = "season " + info.Season, Content = SeasonNfo(info.Title, info.Season) });
+                }
             }
         }
     }
@@ -2191,6 +2230,17 @@ public class CuratorService
         return System.IO.Path.Combine(drive, "_curator_trash", System.IO.Path.GetRelativePath(drive, path));
     }
 
+    /// <summary>"Each season its own show" layout, but this folder holds season folders you chose to keep (grouped show).</summary>
+    private static bool GroupedShow(string dir) =>
+        Flat && Directory.GetDirectories(dir).Any(d => FolderRuleFor(d) is { Action: "season" });
+
+    /// <summary>A season folder's season.nfo: its number (for the order) and title, locked.</summary>
+    private static string SeasonNfo(string title, int? season) =>
+        new XDocument(new XElement("season",
+            new XElement("title", title),
+            season is int n ? new XElement("seasonnumber", n) : null,
+            new XElement("lockdata", "true"))).ToString();
+
     /// <summary>A folder that exists, or a new one whose parent exists ("group into new folder").</summary>
     private static bool NewOrExistingDir(string path) =>
         Directory.Exists(path) || (System.IO.Path.GetDirectoryName(path) is { } parent && Directory.Exists(parent));
@@ -2216,7 +2266,7 @@ public class CuratorService
                 if (op.Note == "group with")
                 {
                     Config.FolderRules.RemoveAll(x => x.Path == op.To);
-                    Config.FolderRules.Add(new FolderRule { Path = op.To, Action = "season", Season = r.Season, Episode = r.Episode });
+                    Config.FolderRules.Add(new FolderRule { Path = op.To, Action = "season", Season = r.Season, Episode = r.Episode, Title = r.Title });
                 }
 
                 changed = true;
@@ -2331,6 +2381,7 @@ public class CuratorService
                 };
             }
 
+            node.Title ??= FolderRuleFor(d)?.Title;
             node.Path = d;
             node.Name = System.IO.Path.GetFileName(d);
             node.Depth = depth;
@@ -2396,7 +2447,7 @@ public class CuratorService
     }
 
     /// <summary>Save what to do with a subfolder (season number / separate show) or a loose video (Movies library).</summary>
-    public bool SetFolderRule(string path, string action, int? season, int? episode = null, string? target = null)
+    public bool SetFolderRule(string path, string action, int? season, int? episode = null, string? target = null, string? title = null)
     {
         path = path.TrimEnd('/');
         var roots = LibraryRoots();
@@ -2421,6 +2472,7 @@ public class CuratorService
             {
                 Path = path, Action = action == "stay" ? "season" : action, Season = season, Episode = episode,
                 Target = action == "into" ? target : null,
+                Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
             });
         }
 

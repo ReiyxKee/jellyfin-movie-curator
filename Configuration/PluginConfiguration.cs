@@ -114,6 +114,9 @@ public class FolderRule
 
     /// <summary>"into": the folder (another show) this one is moved into.</summary>
     public string? Target { get; set; }
+
+    /// <summary>A season folder's own title inside a grouped show ("Himouto! Umaru-chan S"): names the folder and its episodes.</summary>
+    public string? Title { get; set; }
 }
 
 public class SeriesGroup
