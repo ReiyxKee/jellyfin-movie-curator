@@ -87,6 +87,10 @@
   #MovieCuratorPage select.mc-text { background-color: var(--mc-bg); }
   #MovieCuratorPage select.mc-text option { background-color: var(--mc-bg); color: inherit; }
   #MovieCuratorPage .mc-title-link { color: inherit; text-decoration: none; }
+  #MovieCuratorPage .mc-notes-tag { cursor: pointer; text-decoration: none; }
+  #MovieCuratorPage .mc-notes { margin: .45em 0 0; padding: .4em .6em .4em 1.6em; border-left: 3px solid var(--mc-warn); background: var(--mc-soft);
+    border-radius: 4px; font-size: .85em; overflow-wrap: anywhere; }
+  #MovieCuratorPage .mc-notes li + li { margin-top: .2em; }
   #MovieCuratorPage .mc-coll-x { cursor: pointer; margin-left: .2em; opacity: .7; }
   #MovieCuratorPage .mc-coll-x:hover { opacity: 1; }
   #MovieCuratorPage .mc-title-link:hover { text-decoration: underline; }
@@ -569,6 +573,7 @@
 
   // ---------------------------------------------------------------- folder tree (every folder / file line has its own actions)
   var openDirs = {}; // path -> 'loading' | listing of its files
+  var notesOpen = {}; // itemId -> notes list shown
   var NODE_TAG = {
     show: '⬆ becomes its own show', up: '⬆ moves up one level', episode: '📥 files merge into the show',
     movies: '🎬 to Movies', into: '🔗 group with ', trash: '🗑 deleted (to trash)', stay: '', season: ''
@@ -721,7 +726,8 @@
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
     if (p.detached) tags.push('<span class="mc-tag">detached</span>');
     if (p.empty) tags.push('<span class="mc-tag warn">🗑 empty</span>');
-    if (p.warnings.length) tags.push('<span class="mc-tag warn" title="' + esc(p.warnings.join('\n')) + '">⚠ ' + p.warnings.length + ' note' + (p.warnings.length > 1 ? 's' : '') + '</span>');
+    if (p.warnings.length) tags.push('<a class="mc-tag warn mc-notes-tag" title="Show / hide the notes">⚠ ' + p.warnings.length + ' note' +
+      (p.warnings.length > 1 ? 's' : '') + (notesOpen[p.itemId] ? ' ▾' : ' ▸') + '</a>');
     (p.collections || []).forEach(function (c) {
       tags.push('<span class="mc-tag info" title="In the Jellyfin collection ' + esc(c) + '">📚 ' + esc(c) +
         ' <a class="mc-coll-x" data-coll="' + esc(c) + '" title="Remove it from this collection">✕</a></span>');
@@ -754,6 +760,7 @@
         '</div>' +
         groupBlock(p) +
         seasonsBlock(p) +
+        (notesOpen[p.itemId] && p.warnings.length ? '<ul class="mc-notes">' + p.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul>' : '') +
         treeBlock(p) +
       '</div></div>';
   }
@@ -2053,6 +2060,7 @@
     var id = rowEl.getAttribute('data-id'), p = planById(id);
     if (e.target.closest('.mc-root-files') && p) { openFolder(p.treeRoot, id); return; }
     if (e.target.closest('.mc-row-play') && p) { playHere(p.itemId); return; }
+    if (e.target.closest('.mc-notes-tag')) { notesOpen[id] = !notesOpen[id]; renderRow(id); return; }
     var cx = e.target.closest('.mc-coll-x');
     if (cx && p) {
       var coll = cx.getAttribute('data-coll');
