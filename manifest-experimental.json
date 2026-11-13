@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.13",
+        "changelog": "[experimental] - Only report changed file instead of full scan\"",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.13/movie-curator_1.1.0-exp.13.zip",
+        "checksum": "1b9ed798a5720131cb46d6b1d8bd1e2f",
+        "timestamp": "2026-11-13T17:53:15Z"
+      },
+      {
         "version": "1.1.0.12",
         "changelog": "[experimental] - fixed move to movie is missing\n- added progress bar episode progress",
         "targetAbi": "10.11.0.0",
