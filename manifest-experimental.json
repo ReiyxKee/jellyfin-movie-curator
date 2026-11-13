@@ -3,6 +3,14 @@
     "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
     "versions": [
       {
+        "version": "1.1.0.15",
+        "changelog": "[experimental] - updated ui ux",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.15/movie-curator_1.1.0-exp.15.zip",
+        "checksum": "ac6faf3cae3b350c17d2b40bd1c9ee91",
+        "timestamp": "2026-11-13T18:33:30Z"
+      },
+      {
         "version": "1.1.0.14",
         "changelog": "[experimental] - new tree",
         "targetAbi": "10.11.0.0",
