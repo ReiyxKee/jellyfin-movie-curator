@@ -45,6 +45,13 @@ public class PlanOptions
     /// </summary>
     [JsonPropertyName("mode")] public string? Mode { get; set; }
 
+    /// <summary>Plan only these items (comma-separated ids; a show brings its combined folders): refreshing one row.</summary>
+    [JsonPropertyName("ids")] public string? Ids { get; set; }
+
+    internal HashSet<Guid>? OnlyIds => string.IsNullOrWhiteSpace(Ids) ? null
+        : Ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToHashSet();
+
     public bool IsSeries => string.Equals(Type, "series", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -1200,7 +1207,9 @@ public class CuratorService
         var ctx = new Ctx();
         var plans = new List<ItemPlan>();
 
-        foreach (var group in Movies().GroupBy(m => System.IO.Path.GetDirectoryName(m.Path)!))
+        var only = opt.OnlyIds;
+        foreach (var group in Movies().GroupBy(m => System.IO.Path.GetDirectoryName(m.Path)!)
+            .Where(g => only == null || g.Any(m => only.Contains(m.Id))))
         {
             var dir = group.Key;
             var siblings = Directory.GetFiles(dir).OrderBy(f => f, StringComparer.Ordinal).ToList();
@@ -1501,11 +1510,21 @@ public class CuratorService
             .GroupBy(s => s.SeriesId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        // one row refreshed: only its group (same-ID folders shown as one) is planned, and only its episodes loaded
+        var only = opt.OnlyIds;
+        var wanted = only == null ? null
+            : series.GroupBy(IdentityKey).Where(g => g.Any(s => only.Contains(s.Id))).SelectMany(g => g.Select(s => s.Id)).ToHashSet();
+        if (wanted != null)
+        {
+            series = series.Where(s => wanted.Contains(s.Id)).ToList();
+        }
+
         var episodesBySeries = _library.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 Recursive = true,
                 IsVirtualItem = false,
+                AncestorIds = wanted?.ToArray() ?? Array.Empty<Guid>(),
             })
             .OfType<Episode>()
             .Where(e => !string.IsNullOrEmpty(e.Path) && File.Exists(e.Path))

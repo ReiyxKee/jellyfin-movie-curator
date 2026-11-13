@@ -694,13 +694,14 @@
   }
   /** Save one line's choice, then rebuild the preview (and re-list the open folders). */
   function saveNode(body) {
+    var rowId = rowIdForPath(body.path);
     return api('POST', 'FolderRule', body).then(function () {
-      var open = Object.keys(openDirs).filter(function (k) { return openDirs[k] !== 'loading'; });
-      return load().then(function () {
+      var open = Object.keys(openDirs).filter(function (k) { return openDirs[k] !== 'loading' && rowIdForPath(k) === rowId; });
+      return (rowId ? reloadRows([rowId]) : load()).then(function () {
         return Promise.all(open.map(function (path) {
           return api('GET', 'Folder?path=' + encodeURIComponent(path)).then(function (l) { openDirs[path] = l || []; }).catch(function () { delete openDirs[path]; });
         }));
-      }).then(render);
+      }).then(function () { if (rowId) renderRow(rowId); else render(); });
     }).catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
   }
   function nodeOf(el) {
@@ -1146,6 +1147,39 @@
     api('POST', 'Scan' + (full ? '?full=true' : '')).then(function (s) { scan = s; scan.scanning = true; renderScan(); scanTimer = setTimeout(loadScan, 3000); })
       .catch(function (e) { Dashboard.alert('Could not start the scan: ' + e.message); });
   });
+
+  /** Re-plan only these rows on the server and redraw just them (a full reload re-plans every show / movie). */
+  function reloadRows(ids) {
+    ids = (ids || []).filter(Boolean);
+    if (!ids.length) return Promise.resolve();
+    var o = opts();
+    return api('GET', 'Plan?type=' + o.type + '&rename=' + o.rename + '&episodes=' + o.episodes + '&nfo=' + o.nfo + '&lockNfo=' + o.lockNfo +
+        '&flatten=' + o.flatten + '&ids=' + encodeURIComponent(ids.join(',')))
+      .then(function (fresh) {
+        var gone = {};
+        ids.concat((fresh || []).map(function (f) { return f.itemId; })).forEach(function (x) { gone[x] = true; });
+        (fresh || []).forEach(function (f) { (f.members || []).forEach(function (m) { gone[m.itemId] = true; }); });
+        var at = -1;
+        plans.forEach(function (x, i) { if (at < 0 && gone[x.itemId]) at = i; });
+        var removed = plans.filter(function (x) { return gone[x.itemId]; }).map(function (x) { return x.itemId; });
+        plans = plans.filter(function (x) { return !gone[x.itemId]; });
+        if (at < 0 || at > plans.length) at = plans.length;
+        Array.prototype.splice.apply(plans, [at, 0].concat(fresh || []));
+        // same rows as before: redraw only those; otherwise (row merged / gone) redraw the list from memory
+        var same = (fresh || []).length === removed.length && (fresh || []).every(function (f) {
+          return removed.indexOf(f.itemId) >= 0 && page.querySelector('.mc-row[data-id="' + f.itemId + '"]');
+        });
+        if (same) fresh.forEach(function (f) { renderRow(f.itemId); });
+        else render();
+      });
+  }
+  /** The row a folder / file path belongs to. */
+  function rowIdForPath(path) {
+    var hit = plans.filter(function (x) {
+      return x.path === path || (x.treeRoot && (path === x.treeRoot || path.indexOf(x.treeRoot + '/') === 0));
+    }).sort(function (a, b) { return (b.treeRoot || '').length - (a.treeRoot || '').length; })[0];
+    return hit && hit.itemId;
+  }
 
   function load() {
     $('#mcSummary').textContent = 'Loading…';
@@ -1790,7 +1824,15 @@
   }
   $('#mcTabMovies').addEventListener('click', function () { setType('movies'); });
   $('#mcTabSeries').addEventListener('click', function () { setType('series'); });
-  $('#mcFilter').addEventListener('input', render);
+  // search: wait until typing pauses (Enter / clearing the box searches right away)
+  var searchTimer = null;
+  $('#mcFilter').addEventListener('input', function (e) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(render, e.target.value ? 350 : 0);
+  });
+  $('#mcFilter').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { clearTimeout(searchTimer); render(); }
+  });
   $('#mcRefresh').addEventListener('click', load);
   $('#mcSelectAllBox').addEventListener('change', function (e) {
     var on = e.target.checked;
@@ -1807,7 +1849,7 @@
   $('#mcUnverifySel').addEventListener('click', function () {
     var ids = selectedIds().filter(function (id) { return planById(id).verified; });
     if (!ids.length) return;
-    verify(ids, false).then(function () { selected = {}; return load(); })
+    verify(ids, false).then(function () { selected = {}; return reloadRows(ids); })
       .catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
   });
   $('#mcSelInfo').addEventListener('click', function (e) {
@@ -1816,7 +1858,7 @@
   $('#mcVerifySel').addEventListener('click', function () {
     var ids = selectedIds().filter(function (id) { return !planById(id).verified; });
     if (!ids.length) return;
-    verify(ids, true).then(function () { selected = {}; return load(); })
+    verify(ids, true).then(function () { selected = {}; return reloadRows(ids); })
       .catch(function (e) { Dashboard.alert('Failed: ' + e.message); });
   });
 
@@ -1827,7 +1869,7 @@
     api('POST', 'Lock', { itemIds: ids, locked: locked }).then(function (n) {
       progress('#mcProgress', null);
       Dashboard.alert((locked ? 'Locked ' : 'Unlocked ') + noun(n) + (type === 'series' ? ' (with their episodes)' : '') + '.');
-      return load();
+      return reloadRows(ids);
     }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Failed: ' + e.message); });
   }
   $('#mcLockSel').addEventListener('click', function () { bulkLock(true); });
@@ -1839,7 +1881,7 @@
         commonTitle(rows.map(function (p) { return p.jellyfinName; })));
       if (!name || !name.trim()) return;
       api('POST', 'Collections', { name: name.trim(), itemIds: rows.map(function (p) { return p.itemId; }) })
-        .then(function () { Dashboard.alert('Added ' + noun(rows.length) + ' to the collection "' + name.trim() + '".'); selected = {}; return load(); })
+        .then(function () { Dashboard.alert('Added ' + noun(rows.length) + ' to the collection "' + name.trim() + '".'); selected = {}; return reloadRows(rows.map(function (r) { return r.itemId; })); })
         .catch(function (e) { Dashboard.alert('Could not add to the collection: ' + e.message); });
       return;
     }
@@ -1901,7 +1943,7 @@
       return chain.then(function () { return api('POST', 'FolderRule', { path: p.treeRoot, action: 'into', target: target }); });
     }, Promise.resolve()).then(function () {
       selected = {};
-      return load();
+      return reloadRows(rows.map(function (r) { return r.itemId; }));
     }).then(function () {
       Dashboard.alert(noun(rows.length) + ' will move into "' + name + '/" on 📁 Move folders (select them and press it). Undo: 🕘 History.');
     }).catch(function (e) { Dashboard.alert('Could not plan it: ' + e.message); load(); });
@@ -2007,7 +2049,7 @@
 
   // ---------------------------------------------------------------- row events
   function saveName(id, name) {
-    return api('POST', 'Name', { itemId: id, name: name }).then(load)
+    return api('POST', 'Name', { itemId: id, name: name }).then(function () { return reloadRows([id]); })
       .catch(function (e) { Dashboard.alert('Could not save name: ' + e.message); });
   }
   function saveFolderRule(path, action, season) {
@@ -2041,7 +2083,7 @@
     } else if (e.target.classList.contains('mc-season')) {
       var v = e.target.value.trim();
       api('POST', 'Season', { itemId: id, season: v === '' ? null : parseInt(v, 10) })
-        .then(load).catch(function (err) { Dashboard.alert('Could not save season: ' + err.message); });
+        .then(function () { return reloadRows([id]); }).catch(function (err) { Dashboard.alert('Could not save season: ' + err.message); });
     }
   });
   $('#mcList').addEventListener('input', function (e) {
@@ -2066,7 +2108,7 @@
       var coll = cx.getAttribute('data-coll');
       if (!confirm('Remove "' + p.jellyfinName + '" from the collection "' + coll + '"?\n(The collection is deleted when nothing is left in it. No files change.)')) return;
       var ids = (p.members && p.members.length ? p.members.map(function (m) { return m.itemId; }) : []).concat([p.itemId]);
-      api('POST', 'Collections/Remove', { name: coll, itemIds: ids }).then(load)
+      api('POST', 'Collections/Remove', { name: coll, itemIds: ids }).then(function () { return reloadRows([p.itemId]); })
         .catch(function (err) { Dashboard.alert('Could not remove it: ' + err.message); });
       return;
     }
@@ -2119,7 +2161,7 @@
       var cur = ((p.seasons || []).filter(function (s) { return s.itemId === sid; })[0] || {}).name || '';
       var name = prompt('Season title (empty = back to the title from the metadata source):', cur);
       if (name === null) return;
-      api('POST', 'SeasonName', { itemId: sid, name: name.trim() }).then(load)
+      api('POST', 'SeasonName', { itemId: sid, name: name.trim() }).then(function () { return reloadRows([id]); })
         .catch(function (err) { Dashboard.alert('Could not rename the season: ' + err.message); });
       return;
     }
@@ -2132,11 +2174,11 @@
     if (e.target.closest('.mc-undo-detach')) { regroup('Group/Reset', { itemIds: [id] }); return; }
     if (e.target.closest('.mc-identify')) openIdentify(id);
     else if (e.target.closest('.mc-verify')) {
-      verify([id], true).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+      verify([id], true).then(function () { return reloadRows([id]); }).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
     }
     else if (e.target.closest('.mc-unverify')) {
       e.preventDefault();
-      verify([id], false).then(load).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
+      verify([id], false).then(function () { return reloadRows([id]); }).catch(function (err) { Dashboard.alert('Failed: ' + err.message); });
     }
     else if (e.target.closest('.mc-lock')) {
       api('POST', 'Lock', { itemIds: [id], locked: !p.locked }).then(function () { p.locked = !p.locked; renderRow(id); })

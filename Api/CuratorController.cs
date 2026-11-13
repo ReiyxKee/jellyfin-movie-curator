@@ -198,8 +198,9 @@ public class CuratorController : ControllerBase
         [FromQuery] bool episodes = false,
         [FromQuery] bool nfo = true,
         [FromQuery] bool lockNfo = true,
-        [FromQuery] bool flatten = true)
-        => _service.BuildPlan(new PlanOptions { Type = type, Rename = rename, Episodes = episodes, Nfo = nfo, LockNfo = lockNfo, Flatten = flatten });
+        [FromQuery] bool flatten = true,
+        [FromQuery] string? ids = null)
+        => _service.BuildPlan(new PlanOptions { Type = type, Rename = rename, Episodes = episodes, Nfo = nfo, LockNfo = lockNfo, Flatten = flatten, Ids = ids });
 
     /// <summary>Apply the plan for the selected movies, then start a library scan.</summary>
     [HttpPost("Apply")]
