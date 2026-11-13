@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "guid": "7c3f2a6e-5d1b-4e8f-9a40-2b6d8e1f0c93",
+    "versions": [
+      {
+        "version": "1.1.0.1",
+        "changelog": "[experimental] - Added experiment track for dev builds\n- setup build/release manufest\n- Updated grouping mechanism\n- Bugfixes on the UI\n- background progress and cancel\n- cache batch fetched result\n- Added Loading Bar\n- Updated Grouping UI for Series\n- Flatten Series Grouping / Handling\n- Update batch identify\n- UI Update\n- Auto mark correct when a manual apply is done\n- added checkbox\n- Updated resolving of sus listing\n- Updated the UI and Query Mode\n- Updated git ignore",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ReiyxKee/jellyfin-movie-curator/releases/download/v1.1.0-exp.1/movie-curator_1.1.0-exp.1.zip",
+        "checksum": "2221a42a0dadead570d5810b4aaea967",
+        "timestamp": "2026-11-13T04:51:36Z"
+      }
+    ],
+    "name": "Movie Curator",
+    "description": "Organize movies and series into clean, consistently named folders (templates + regex rules), fix wrong matches (search & pick or suggestions, any metadata source), lock items against batch refreshes, and keep identifications in locked NFO files. Preview first, undo anytime.",
+    "overview": "Organize movie & series folders, fix matches, lock and keep identifications",
+    "owner": "Reiyx",
+    "category": "General"
+  }
+]
