@@ -558,6 +558,7 @@ public class CuratorService
     {
         var kids = Directory.GetDirectories(dir)
             .Where(d => !IsJunk(d) && HasVideosBelow(d) && !ExtrasLike.IsMatch(System.IO.Path.GetFileName(d).Trim()))
+            .Where(d => FolderRuleFor(d) is not { } r || r.Action == "show") // you chose to keep it here (Stay, a season...)
             .OrderBy(d => d, StringComparer.Ordinal)
             .ToList();
         if (kids.Count < 2)
@@ -1696,6 +1697,8 @@ public class CuratorService
         if (members.Count == 1 && ContainerChildren(dir) is { } kids)
         {
             p.ContainerShows = kids.Select(k => System.IO.Path.GetFileName(k)).ToList();
+            p.Tree = BuildTree(dir, 1, d => kids.Contains(d) && opt.Flatten && FolderRuleFor(d) == null
+                ? new TreeNode { Action = "show" } : null);
             if (opt.Flatten)
             {
                 var parentDir = System.IO.Path.GetDirectoryName(dir)!;
@@ -2166,6 +2169,42 @@ public class CuratorService
     private static bool NewOrExistingDir(string path) =>
         Directory.Exists(path) || (System.IO.Path.GetDirectoryName(path) is { } parent && Directory.Exists(parent));
 
+    /// <summary>
+    /// After a move: your choices for things inside the moved folder move with it (season / episode numbers...); the
+    /// moved item's own one-off move is done, so it's cleared - except "group with", which becomes an explicit Stay so the
+    /// folder isn't split out of its new show again.
+    /// </summary>
+    private static bool FollowMove(PlanOp op)
+    {
+        if (string.IsNullOrEmpty(op.From) || string.IsNullOrEmpty(op.To))
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (var r in Config.FolderRules.ToList())
+        {
+            if (r.Path == op.From)
+            {
+                Config.FolderRules.Remove(r);
+                if (op.Note == "group with")
+                {
+                    Config.FolderRules.RemoveAll(x => x.Path == op.To);
+                    Config.FolderRules.Add(new FolderRule { Path = op.To, Action = "season", Season = r.Season, Episode = r.Episode });
+                }
+
+                changed = true;
+            }
+            else if (IsUnder(r.Path, op.From))
+            {
+                r.Path = op.To + r.Path.Substring(op.From.Length);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     private static readonly Regex OrderPrefix = new(@"^\d+\s*[.\-_)]\s*");
 
     /// <summary>
@@ -2609,6 +2648,7 @@ public class CuratorService
     {
         var result = new ApplyResult();
         var log = new List<PlanOp>();
+        var rulesChanged = false;
         var wanted = itemIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var selected = BuildPlan(opt).Where(p => wanted.Contains(p.ItemId)).ToList();
         var total = selected.Sum(p => p.Ops.Count);
@@ -2629,9 +2669,11 @@ public class CuratorService
                             break;
                         case "move":
                             Rename(op.From, op.To, false);
+                            rulesChanged |= FollowMove(op);
                             break;
                         case "dirmove":
                             Rename(op.From, op.To, true);
+                            rulesChanged |= FollowMove(op);
                             break;
                         case "rmdir":
                             if (!Directory.Exists(op.To) || Directory.EnumerateFileSystemEntries(op.To).Any()) continue;
@@ -2656,6 +2698,11 @@ public class CuratorService
                     _logger.LogError(ex, "Curator: {Kind} failed for {From}", op.Kind, op.From);
                 }
             }
+        }
+
+        if (rulesChanged)
+        {
+            Plugin.Instance!.SaveConfiguration();
         }
 
         if (log.Count > 0)
