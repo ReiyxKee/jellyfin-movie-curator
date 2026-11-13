@@ -1675,7 +1675,10 @@ public class CuratorService
 
             // unnumbered videos directly in the series folder (movies / specials): leave, or move to the Movies library
             var excludedFiles = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && EpNumber(ctx, e) == null))
+            // a show folder holding just one video is usually a movie / OVA, whatever number Jellyfin read from its
+            // name ("City Hunter - 357 Magnum" -> S03E57), so it gets the choice too
+            var singleVideo = VideoCount(mDir) == 1;
+            foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && (singleVideo || EpNumber(ctx, e) == null)))
             {
                 var action = FolderRuleFor(e.Path)?.Action == "movies" ? "movies" : "leave";
                 p.LooseVideos.Add(new LooseVideoInfo { Path = e.Path, Action = action });
