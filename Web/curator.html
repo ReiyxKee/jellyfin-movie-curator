@@ -129,7 +129,7 @@
       <button is="emby-button" type="button" class="raised mc-btn" id="mcLockSel"><span>Lock</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnlockSel"><span>Unlock</span></button>
       <span class="mc-sep"></span>
-      <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo"><span>Undo last folder change</span></button>
+      <button is="emby-button" type="button" class="raised mc-btn" id="mcUndo" title="Folder change history: undo or rewind"><span>🕘 History / undo</span></button>
 
       <button is="emby-button" type="button" class="raised mc-btn mc-icon mc-push" id="mcRefresh" title="Refresh" aria-label="Refresh"><span aria-hidden="true">↻</span></button>
       <button is="emby-button" type="button" class="raised mc-btn mc-icon" id="mcOpenNaming" title="Naming &amp; options" aria-label="Naming &amp; options"><span aria-hidden="true">⚙</span></button>
@@ -201,6 +201,23 @@
     </div>
   </div>
 
+  <!-- ============================================================ folder change history -->
+  <div class="mc-modal" id="mcHistory" hidden>
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
+      <h3><span>🕘 Folder change history</span>
+        <span class="mc-bar" style="margin:0">
+          <button is="emby-button" type="button" class="raised mc-btn" id="mcHistUndoLast"><span>Undo last change</span></button>
+          <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
+        </span></h3>
+      <p class="mc-meta" style="margin:0">Newest first. <b>Rewind</b> undoes that change and every change after it, so the library goes back to how it
+        was before it. How many changes are kept is set by <i>Undo history</i> in ⚙ options.</p>
+      <div class="mc-progress" id="mcHistProgress" hidden><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div>
+      </div>
+      <div class="mc-dialog-body"><div id="mcHistList"></div></div>
+    </div>
+  </div>
+
   <!-- ============================================================ naming & options modal -->
   <div class="mc-modal" id="mcNaming" hidden>
     <div class="mc-dialog mc-split">
@@ -221,6 +238,11 @@
         <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
         <label title="Movies in 'Rush Hour 1-3/' and shows inside 'Fate Series/' each get their own top-level folder">
           <input type="checkbox" id="mcFlatten" checked> Flatten collection folders</label>
+      </div>
+      <div class="mc-bar">
+        <label title="How many folder changes can be undone with 'Undo last folder change'. Older ones are forgotten. -1 = keep all.">
+          Undo history <input class="mc-text" id="mcUndoLimit" type="number" min="-1" step="1" style="width:5em"> folder changes
+          <span class="mc-meta">(-1 = keep every change; minimum 1)</span></label>
       </div>
 
       <p class="mc-meta">Tokens: <code>{title}</code>, <code>{originalTitle}</code> (falls back to title), <code>{year}</code>, <code>{tmdb}</code>, <code>{imdb}</code>, <code>{tvdb}</code>.
@@ -713,7 +735,7 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    var top = ['#mcIdentify', '#mcBatch', '#mcNaming'].filter(function (s) { return !$(s).hidden; })[0];
+    var top = ['#mcIdentify', '#mcBatch', '#mcHistory', '#mcNaming'].filter(function (s) { return !$(s).hidden; })[0];
     if (top) hideModal(top);
   });
 
@@ -1256,6 +1278,7 @@
       $('#mcTplEpisode').value = cfg.EpisodeTemplate || '';
       $('#mcTplSeriesDisplay').value = cfg.SeriesDisplayTemplate || '';
       $('#mcRules').value = (cfg.CleanupRules || []).map(function (r) { return r.Pattern + ' => ' + r.Replacement; }).join('\n');
+      $('#mcUndoLimit').value = cfg.UndoHistoryLimit == null ? 5 : cfg.UndoHistoryLimit;
       namingExample();
     });
   }
@@ -1278,6 +1301,8 @@
       cfg.EpisodeTemplate = $('#mcTplEpisode').value.trim() || DEFAULTS.episode;
       cfg.SeriesDisplayTemplate = $('#mcTplSeriesDisplay').value.trim();
       cfg.CleanupRules = r.rules;
+      var lim = parseInt($('#mcUndoLimit').value, 10);
+      cfg.UndoHistoryLimit = isNaN(lim) ? 5 : (lim < 0 ? -1 : Math.max(1, lim));
       return ApiClient.updatePluginConfiguration(PLUGIN_ID, cfg);
     }).then(function () { hideModal('#mcNaming'); return load(); })
       .catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
@@ -1365,14 +1390,69 @@
     }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Apply failed: ' + e.message); load(); });
   });
 
-  $('#mcUndo').addEventListener('click', function () {
-    if (!confirm('Undo the most recent folder change? Files go back where they were and NFOs it created are removed.')) return;
-    progress('#mcProgress', { text: 'Undoing the last folder change…' });
-    api('POST', 'Undo').then(function (r) {
-      progress('#mcProgress', null);
-      Dashboard.alert('Undone: ' + r.done + ' change(s).' + (r.errors.length ? '\n\n' + r.errors.join('\n') : ''));
-      return load();
-    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Undo failed: ' + e.message); });
+  // ---------------------------------------------------------------- folder change history (undo / rewind)
+  var history = [], histOpen = {};
+  var KIND_TEXT = { move: 'file moves', dirmove: 'folder moves/renames', mkdir: 'new folders', rmdir: 'folders removed', nfo: 'NFOs', display: 'title changes' };
+  function libRoot(path) {
+    var roots = plans.map(function (p) { return p.root; }).filter(Boolean);
+    return roots.filter(function (r) { return path.indexOf(r + '/') === 0; })[0] || '';
+  }
+  function fmtTime(s) {
+    var d = new Date(s);
+    return isNaN(d) ? s : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+  function renderHistory() {
+    if (!history.length) { $('#mcHistList').innerHTML = '<p class="mc-meta" style="padding:1em">No folder changes recorded yet.</p>'; return; }
+    $('#mcHistList').innerHTML = history.map(function (h) {
+      var kinds = Object.keys(h.kinds).map(function (k) { return h.kinds[k] + ' ' + (KIND_TEXT[k] || k); }).join(', ');
+      var ops = histOpen[h.id] ? '<div class="mc-ops">' + h.ops.map(function (o) {
+        return esc(opLine(o, libRoot(o.to || o.from || '')));
+      }).join('\n') + (h.total > h.ops.length ? '\n… and ' + (h.total - h.ops.length) + ' more' : '') + '</div>' : '';
+      return '<div class="mc-row" data-hist="' + esc(h.id) + '" style="display:block">' +
+        '<div class="mc-bar" style="margin:0;justify-content:space-between">' +
+          '<span><b>' + esc(fmtTime(h.time)) + '</b> · ' + h.total + ' change(s)' +
+            (h.undone ? ' <span class="mc-tag">undone ✓</span>' : '') + '</span>' +
+          (h.undone ? '<span class="mc-meta">already undone</span>'
+            : '<button is="emby-button" type="button" class="raised mc-btn mc-rewind"><span>⏪ Rewind to before this</span></button>') +
+        '</div>' +
+        '<div class="mc-meta">' + esc(kinds) + '</div>' +
+        (h.items.length ? '<div class="mc-where">📁 ' + esc(h.items.join(', ')) + (h.items.length >= 12 ? ', …' : '') + '</div>' : '') +
+        '<a class="mc-link mc-hist-details">' + (histOpen[h.id] ? '▾ hide details' : '▸ details') + '</a>' + ops +
+      '</div>';
+    }).join('');
+  }
+  function loadHistory() {
+    $('#mcHistList').innerHTML = '<p class="mc-meta" style="padding:1em">Loading…</p>';
+    return api('GET', 'History').then(function (h) { history = h; renderHistory(); })
+      .catch(function (e) { $('#mcHistList').innerHTML = '<p class="mc-warn" style="padding:1em">Could not load history: ' + esc(e.message) + '</p>'; });
+  }
+  function afterUndo(r, what) {
+    progress('#mcHistProgress', null);
+    Dashboard.alert(what + ': ' + r.done + ' change(s) reversed.' + (r.errors.length ? '\n\nProblems:\n' + r.errors.join('\n') : '') +
+      '\n\nA library scan has started.');
+    return loadHistory().then(load);
+  }
+  $('#mcUndo').addEventListener('click', function () { showModal('#mcHistory'); loadHistory(); });
+  $('#mcHistUndoLast').addEventListener('click', function () {
+    if (!confirm('Undo the most recent folder change?')) return;
+    progress('#mcHistProgress', { text: 'Undoing the last folder change…' });
+    api('POST', 'Undo').then(function (r) { return afterUndo(r, 'Undone'); })
+      .catch(function (e) { progress('#mcHistProgress', null); Dashboard.alert('Undo failed: ' + e.message); });
+  });
+  $('#mcHistList').addEventListener('click', function (e) {
+    var rowEl = e.target.closest('[data-hist]');
+    if (!rowEl) return;
+    var id = rowEl.getAttribute('data-hist');
+    if (e.target.closest('.mc-hist-details')) { histOpen[id] = !histOpen[id]; renderHistory(); return; }
+    if (!e.target.closest('.mc-rewind')) return;
+    var target = history.filter(function (h) { return h.id === id; })[0];
+    var runs = history.filter(function (h) { return !h.undone && h.id >= id; });
+    var n = runs.reduce(function (s, h) { return s + h.total; }, 0);
+    if (!confirm('Rewind to before ' + fmtTime(target.time) + '?\n\nThis undoes ' + runs.length + ' folder change run(s) (' + n +
+        ' changes), newest first. Files go back where they were and NFOs those runs created are removed.')) return;
+    progress('#mcHistProgress', { text: 'Rewinding ' + runs.length + ' folder change run(s)…' });
+    api('POST', 'History/' + encodeURIComponent(id) + '/Rewind').then(function (r) { return afterUndo(r, 'Rewound'); })
+      .catch(function (err) { progress('#mcHistProgress', null); Dashboard.alert('Rewind failed: ' + err.message); });
   });
 
   // ---------------------------------------------------------------- row events

@@ -47,6 +47,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public List<RegexRule> CleanupRules { get; set; } = new();
 
     /// <summary>
+    /// How many folder changes ("Adjust folders" runs) are kept for "Undo last folder change". Older apply logs are
+    /// deleted after each new one. -1 = keep every revision until you delete the logs yourself. Minimum 1.
+    /// </summary>
+    public int UndoHistoryLimit { get; set; } = 5;
+
+    /// <summary>
     /// Identifications a user confirmed with "Looks right". Each entry is the item's identity at that moment
     /// (type + provider IDs), so re-identifying it to something else clears the mark automatically.
     /// </summary>

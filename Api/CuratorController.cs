@@ -138,6 +138,15 @@ public class CuratorController : ControllerBase
     public async Task<ActionResult<ApplyResult>> Undo()
         => await _service.UndoLast(HttpContext.RequestAborted).ConfigureAwait(false);
 
+    /// <summary>Folder-change history, newest first.</summary>
+    [HttpGet("History")]
+    public ActionResult<List<HistoryEntry>> History() => _service.History();
+
+    /// <summary>Rewind to just before a history entry: undo it and every applied change after it.</summary>
+    [HttpPost("History/{id}/Rewind")]
+    public async Task<ActionResult<ApplyResult>> Rewind([FromRoute] string id)
+        => await _service.Rewind(id, HttpContext.RequestAborted).ConfigureAwait(false);
+
     /// <summary>Lock or unlock movies/series (a series includes its seasons and episodes) so library refreshes / "Refresh all metadata" leave them alone.</summary>
     [HttpPost("Lock")]
     public async Task<ActionResult<int>> Lock([FromBody] LockRequest request, CancellationToken cancellationToken)

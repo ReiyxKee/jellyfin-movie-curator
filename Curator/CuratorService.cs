@@ -203,6 +203,25 @@ public class LooseVideoInfo
     [JsonPropertyName("action")] public string Action { get; set; } = "leave";
 }
 
+/// <summary>One folder change ("Adjust folders" run) in the undo history.</summary>
+public class HistoryEntry
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+
+    /// <summary>Local time of the run (ISO, no zone).</summary>
+    [JsonPropertyName("time")] public string Time { get; set; } = string.Empty;
+
+    [JsonPropertyName("undone")] public bool Undone { get; set; }
+
+    [JsonPropertyName("total")] public int Total { get; set; }
+
+    [JsonPropertyName("kinds")] public Dictionary<string, int> Kinds { get; set; } = new();
+
+    [JsonPropertyName("items")] public List<string> Items { get; set; } = new();
+
+    [JsonPropertyName("ops")] public List<PlanOp> Ops { get; set; } = new();
+}
+
 public class ApplyResult
 {
     [JsonPropertyName("done")] public int Done { get; set; }
@@ -1766,6 +1785,7 @@ public class CuratorService
             Directory.CreateDirectory(LogDir);
             var path = System.IO.Path.Combine(LogDir, $"apply-{DateTime.Now:yyyyMMdd-HHmmss}.json");
             File.WriteAllText(path, JsonSerializer.Serialize(log, new JsonSerializerOptions { WriteIndented = true }));
+            PruneHistory();
             result.Log = path;
             _logger.LogInformation("Curator: applied {Count} changes, log {Log}", log.Count, path);
             QueueScan();
@@ -1774,19 +1794,115 @@ public class CuratorService
         return result;
     }
 
+    private static readonly Regex LogName = new(@"^apply-(\d{8})-(\d{6})$");
+
+    private static string LogId(string file) => System.IO.Path.GetFileNameWithoutExtension(file);
+
+    /// <summary>Folder-change history, newest first (as many as the "Undo history" setting keeps).</summary>
+    public List<HistoryEntry> History()
+    {
+        var list = new List<HistoryEntry>();
+        if (!Directory.Exists(LogDir))
+        {
+            return list;
+        }
+
+        foreach (var f in Directory.GetFiles(LogDir, "apply-*.*")
+                     .Where(f => f.EndsWith(".json", StringComparison.Ordinal) || f.EndsWith(".undone", StringComparison.Ordinal))
+                     .OrderByDescending(f => System.IO.Path.GetFileName(f), StringComparer.Ordinal))
+        {
+            List<PlanOp> ops;
+            try
+            {
+                ops = JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(f)) ?? new();
+            }
+            catch (Exception)
+            {
+                continue; // unreadable log: skip it
+            }
+
+            var id = LogId(f);
+            var m = LogName.Match(id);
+            list.Add(new HistoryEntry
+            {
+                Id = id,
+                Time = m.Success
+                    ? DateTime.ParseExact(m.Groups[1].Value + m.Groups[2].Value, "yyyyMMddHHmmss", CultureInfo.InvariantCulture).ToString("s", CultureInfo.InvariantCulture)
+                    : File.GetLastWriteTime(f).ToString("s", CultureInfo.InvariantCulture),
+                Undone = f.EndsWith(".undone", StringComparison.Ordinal),
+                Total = ops.Count,
+                Kinds = ops.GroupBy(o => o.Kind).ToDictionary(g => g.Key, g => g.Count()),
+                // the folders this run touched (movie / series / season folder names), for a quick overview
+                Items = ops.Where(o => o.Kind is "move" or "dirmove")
+                    .Select(o => System.IO.Path.GetFileName(o.Kind == "dirmove" ? o.To : System.IO.Path.GetDirectoryName(o.To) ?? string.Empty))
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Distinct()
+                    .Take(12)
+                    .ToList(),
+                Ops = ops.Take(300).ToList(),
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>Undo the most recent folder change that hasn't been undone yet.</summary>
     public async Task<ApplyResult> UndoLast(CancellationToken ct)
     {
-        var result = new ApplyResult();
         var last = Directory.Exists(LogDir)
             ? Directory.GetFiles(LogDir, "apply-*.json").OrderBy(f => f, StringComparer.Ordinal).LastOrDefault()
             : null;
         if (last == null)
         {
-            result.Errors.Add("Nothing to undo.");
-            return result;
+            return new ApplyResult { Errors = { "Nothing to undo." } };
         }
 
-        var log = JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(last)) ?? new();
+        var result = await UndoLog(last, ct).ConfigureAwait(false);
+        PruneHistory();
+        QueueScan();
+        return result;
+    }
+
+    /// <summary>
+    /// Rewind to just before folder change <paramref name="id"/>: undo it and every applied change after it, newest first.
+    /// </summary>
+    public async Task<ApplyResult> Rewind(string id, CancellationToken ct)
+    {
+        if (!LogName.IsMatch(id ?? string.Empty) || !Directory.Exists(LogDir))
+        {
+            return new ApplyResult { Errors = { "Unknown history entry." } };
+        }
+
+        var logs = Directory.GetFiles(LogDir, "apply-*.json")
+            .Where(f => string.CompareOrdinal(LogId(f), id) >= 0)
+            .OrderByDescending(f => System.IO.Path.GetFileName(f), StringComparer.Ordinal)
+            .ToList();
+        var total = new ApplyResult();
+        if (logs.Count == 0)
+        {
+            total.Errors.Add("Nothing to rewind: that change and everything after it are already undone.");
+            return total;
+        }
+
+        foreach (var log in logs)
+        {
+            var r = await UndoLog(log, ct).ConfigureAwait(false);
+            total.Done += r.Done;
+            total.Errors.AddRange(r.Errors);
+        }
+
+        total.Log = string.Join(", ", logs.Select(LogId));
+        _logger.LogInformation("Curator: rewound {Count} folder change(s) back to before {Id}", logs.Count, id);
+        PruneHistory();
+        QueueScan();
+        return total;
+    }
+
+    /// <summary>Reverse one apply log (newest operation first) and mark it undone.</summary>
+    private async Task<ApplyResult> UndoLog(string file, CancellationToken ct)
+    {
+        var result = new ApplyResult();
+        var log = JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(file)) ?? new();
         foreach (var op in Enumerable.Reverse(log))
         {
             try
@@ -1821,10 +1937,42 @@ public class CuratorService
             }
         }
 
-        File.Move(last, System.IO.Path.ChangeExtension(last, ".undone"));
-        result.Log = last;
-        QueueScan();
+        File.Move(file, System.IO.Path.ChangeExtension(file, ".undone"));
+        result.Log = file;
         return result;
+    }
+
+    /// <summary>Keep only the newest UndoHistoryLimit apply logs (undone ones count too); -1 keeps everything.</summary>
+    private void PruneHistory()
+    {
+        var limit = Config.UndoHistoryLimit;
+        if (limit < 0 || !Directory.Exists(LogDir))
+        {
+            return;
+        }
+
+        var keep = Math.Max(1, limit);
+        var old = Directory.GetFiles(LogDir, "apply-*.*")
+            .Where(f => f.EndsWith(".json", StringComparison.Ordinal) || f.EndsWith(".undone", StringComparison.Ordinal))
+            .OrderByDescending(f => System.IO.Path.GetFileName(f), StringComparer.Ordinal) // names are apply-yyyyMMdd-HHmmss
+            .Skip(keep)
+            .ToList();
+        foreach (var f in old)
+        {
+            try
+            {
+                File.Delete(f);
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Curator: could not delete old apply log {File}", f);
+            }
+        }
+
+        if (old.Count > 0)
+        {
+            _logger.LogInformation("Curator: removed {Count} old apply log(s) (keeping {Keep})", old.Count, keep);
+        }
     }
 
     private void QueueScan()
