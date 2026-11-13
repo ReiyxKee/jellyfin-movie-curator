@@ -275,8 +275,8 @@
             <option value="flat">Each season as its own show</option>
             <option value="nested">Seasons inside one show</option>
           </select></label>
-        <label title="Off: folder changes wait until you press 'Scan library' (moved items disappear from Jellyfin until then)">
-          <input type="checkbox" id="mcAutoScan" checked> Scan the library after each folder change</label>
+        <label title="Off: changes wait until you press 'Update changed folders' (moved items disappear from Jellyfin until then). Either way only the changed folders are re-checked, never a full scan.">
+          <input type="checkbox" id="mcAutoScan" checked> Tell Jellyfin about changed folders right away</label>
       </div>
       <div class="mc-bar">
         <label title="How many folder changes can be undone with 'Undo last folder change'. Older ones are forgotten. -1 = keep all.">
@@ -933,12 +933,14 @@
     var b = $('#mcScan');
     b.disabled = scan.scanning;
     b.classList.toggle('button-submit', scan.pending > 0 && !scan.scanning);
-    b.querySelector('span').textContent = scan.scanning ? '⟳ Scanning…'
-      : '⟳ Scan library' + (scan.pending ? ' (' + scan.pending + ' waiting)' : '');
+    b.querySelector('span').textContent = scan.scanning ? (scan.full ? '⟳ Scanning all libraries…' : '⟳ Jellyfin updating…')
+      : scan.pending ? '⟳ Update changed folders (' + scan.pending + ')' : '⟳ Scan library';
+    b.title = scan.pending ? 'Tell Jellyfin which folders changed; it re-checks only those (no full scan)'
+      : 'Full scan of all libraries (slow: re-checks every show and movie)';
   }
   function scanNote() {
-    return scan.auto ? 'A library scan has started.'
-      : 'Not scanned yet (automatic scanning is off): press ⟳ Scan library when you are done.';
+    return scan.auto ? 'Jellyfin picks up the changed folders in about a minute (only those, no full library scan).'
+      : 'Jellyfin hasn\'t been told yet (automatic updates are off): press ⟳ Update changed folders when you are done.';
   }
   function loadScan() {
     clearTimeout(scanTimer);
@@ -952,7 +954,9 @@
     }).catch(function () {});
   }
   $('#mcScan').addEventListener('click', function () {
-    api('POST', 'Scan').then(function (s) { scan = s; scan.scanning = true; renderScan(); scanTimer = setTimeout(loadScan, 3000); })
+    var full = !scan.pending;
+    if (full && !confirm('No folder changes are waiting.\n\nRun a FULL scan of all libraries? It re-checks every show and movie and can take a long time.')) return;
+    api('POST', 'Scan' + (full ? '?full=true' : '')).then(function (s) { scan = s; scan.scanning = true; renderScan(); scanTimer = setTimeout(loadScan, 3000); })
       .catch(function (e) { Dashboard.alert('Could not start the scan: ' + e.message); });
   });
 

@@ -267,6 +267,9 @@ public class ScanStatus
 
     [JsonPropertyName("scanning")] public bool Scanning { get; set; }
 
+    /// <summary>A full scan of all libraries is running (otherwise Jellyfin is only picking up reported changes).</summary>
+    [JsonPropertyName("full")] public bool Full { get; set; }
+
     /// <summary>Scan automatically after each folder change.</summary>
     [JsonPropertyName("auto")] public bool Auto { get; set; }
 
@@ -329,11 +332,14 @@ public class CuratorService
     private readonly ILibraryManager _library;
     private readonly ILogger _logger;
 
-    public CuratorService(ILibraryManager library, ILogger logger)
+    public CuratorService(ILibraryManager library, ILibraryMonitor monitor, ILogger logger)
     {
         _library = library;
+        _monitor = monitor;
         _logger = logger;
     }
+
+    private readonly ILibraryMonitor _monitor;
 
     private static Configuration.PluginConfiguration Config => Plugin.Instance!.Configuration;
 
@@ -2234,6 +2240,7 @@ public class CuratorService
                     }
 
                     log.Add(new PlanOp { Kind = op.Kind, From = op.From, To = op.To, ItemId = op.ItemId });
+                    Touched(op);
                     result.Done++;
                 }
                 catch (Exception ex)
@@ -2410,6 +2417,7 @@ public class CuratorService
                         break;
                 }
 
+                Touched(op);
                 result.Done++;
             }
             catch (Exception ex)
@@ -2461,13 +2469,84 @@ public class CuratorService
     private static volatile bool _scanning;
     private static DateTime? _lastScan;
 
+    /// <summary>Files / folders changed since Jellyfin was last told about them.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _changedPaths = new(StringComparer.Ordinal);
+
+    /// <summary>Until when Jellyfin is (roughly) busy picking up reported changes: its monitor waits ~1 minute, then re-checks.</summary>
+    private static DateTime _updatingUntil = DateTime.MinValue;
+
     public static ScanStatus GetScanStatus() => new()
     {
         Pending = _pendingChanges,
-        Scanning = _scanning,
+        Scanning = _scanning || DateTime.UtcNow < _updatingUntil,
+        Full = _scanning,
         Auto = Config.ScanAfterChanges,
         LastScan = _lastScan?.ToString("o", CultureInfo.InvariantCulture),
     };
+
+    private static void Touched(PlanOp op)
+    {
+        if (op.Kind is "display")
+        {
+            return; // database only
+        }
+
+        foreach (var p in new[] { op.From, op.To })
+        {
+            if (!string.IsNullOrEmpty(p))
+            {
+                _changedPaths[p] = 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tells Jellyfin exactly which paths changed (as Sonarr / Radarr do via "Library/Media/Updated"): it re-checks only the
+    /// nearest folder it knows for each (the show, or the library folder for moved show / movie folders) instead of
+    /// scanning every library.
+    /// </summary>
+    private int ReportChanges()
+    {
+        var roots = LibraryRoots();
+        var paths = _changedPaths.Keys.ToList();
+        foreach (var p in paths)
+        {
+            _changedPaths.TryRemove(p, out _);
+        }
+
+        // a folder and everything below it is one report; skip the curator's own trash / log folders
+        var report = paths.Where(p => roots.Any(r => IsUnder(p, r)))
+            .Select(p => p.TrimEnd('/'))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(p => p.Length)
+            .ToList();
+        var kept = new List<string>();
+        foreach (var p in report)
+        {
+            if (!kept.Any(k => IsUnder(p, k)))
+            {
+                kept.Add(p);
+            }
+        }
+
+        foreach (var p in kept)
+        {
+            try
+            {
+                _monitor.ReportFileSystemChanged(p);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Curator: could not report {Path} to Jellyfin", p);
+            }
+        }
+
+        Interlocked.Exchange(ref _pendingChanges, 0);
+        _lastScan = DateTime.UtcNow;
+        _updatingUntil = DateTime.UtcNow.AddSeconds(kept.Count > 0 ? 75 : 0);
+        _logger.LogInformation("Curator: reported {Count} changed path(s) to Jellyfin (no full library scan)", kept.Count);
+        return kept.Count;
+    }
 
     /// <summary>After folder changes: scan now, or (when automatic scanning is off) remember them for "Scan library".</summary>
     private void ScanOrDefer(int changes)
@@ -2479,7 +2558,7 @@ public class CuratorService
 
         if (Config.ScanAfterChanges)
         {
-            StartScan();
+            ReportChanges();
         }
         else
         {
@@ -2488,9 +2567,15 @@ public class CuratorService
         }
     }
 
-    /// <summary>Scan all libraries now (one scan at a time). Returns false when a scan is already running.</summary>
-    public bool StartScan()
+    /// <summary>"Scan" button: tell Jellyfin about the waiting changes only; a full scan of all libraries only when asked.</summary>
+    public bool StartScan(bool full = false)
     {
+        if (!full)
+        {
+            ReportChanges();
+            return true;
+        }
+
         if (_scanning)
         {
             return false;
@@ -2498,6 +2583,7 @@ public class CuratorService
 
         _scanning = true;
         Interlocked.Exchange(ref _pendingChanges, 0);
+        _changedPaths.Clear();
         _ = Task.Run(async () =>
         {
             try

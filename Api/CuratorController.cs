@@ -103,14 +103,14 @@ public class CuratorController : ControllerBase
     private readonly ILogger<CuratorController> _logger;
     private readonly CuratorService _service;
 
-    public CuratorController(ILibraryManager library, IProviderManager providers, IFileSystem fileSystem, ICollectionManager collections, ILogger<CuratorController> logger)
+    public CuratorController(ILibraryManager library, ILibraryMonitor monitor, IProviderManager providers, IFileSystem fileSystem, ICollectionManager collections, ILogger<CuratorController> logger)
     {
         _collections = collections;
         _library = library;
         _providers = providers;
         _fileSystem = fileSystem;
         _logger = logger;
-        _service = new CuratorService(library, logger);
+        _service = new CuratorService(library, monitor, logger);
     }
 
     /// <summary>
@@ -260,11 +260,11 @@ public class CuratorController : ControllerBase
     [HttpGet("Scan")]
     public ActionResult<ScanStatus> GetScan() => CuratorService.GetScanStatus();
 
-    /// <summary>Scan all libraries now (e.g. after a session of folder changes with automatic scanning off).</summary>
+    /// <summary>Tell Jellyfin about the waiting folder changes; with full=true, scan all libraries.</summary>
     [HttpPost("Scan")]
-    public ActionResult<ScanStatus> StartScan()
+    public ActionResult<ScanStatus> StartScan([FromQuery] bool full = false)
     {
-        _service.StartScan();
+        _service.StartScan(full);
         return CuratorService.GetScanStatus();
     }
 
