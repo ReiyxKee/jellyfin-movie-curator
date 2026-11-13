@@ -112,6 +112,45 @@ public class CuratorController : ControllerBase
     public ActionResult<IdentifyJob> StopIdentifyJob([FromRoute] string id, [FromQuery] bool force = false) =>
         IdentifyQueue.Stop(id, force) is { } job ? job : NotFound();
 
+    // ------------------------------------------------------------------ background jobs (survive closing the page)
+    /// <summary>All curator jobs: running ones and those finished in the last few hours.</summary>
+    [HttpGet("Jobs")]
+    public ActionResult<List<JobSummary>> Jobs() => JobRegistry.Summaries();
+
+    /// <summary>Search metadata sources for many items on the server (batch "Identify selected").</summary>
+    [HttpPost("SearchJobs")]
+    public ActionResult<SearchJob> StartSearchJob([FromBody] SearchJobRequest request)
+        => request.Items.Count == 0 ? BadRequest("No items.") : SearchQueue.Start(request, _providers, _logger);
+
+    [HttpGet("SearchJobs/{id}")]
+    public ActionResult<SearchJob> GetSearchJob([FromRoute] string id) => SearchQueue.Get(id) is { } job ? job : NotFound();
+
+    [HttpPost("SearchJobs/{id}/Stop")]
+    public ActionResult<SearchJob> StopSearchJob([FromRoute] string id, [FromQuery] bool force = false)
+        => SearchQueue.Stop(id, force) is { } job ? job : NotFound();
+
+    /// <summary>Apply folder changes in the background.</summary>
+    [HttpPost("FolderJobs/Apply")]
+    public ActionResult<FolderJob> StartApplyJob([FromBody] ApplyRequest request)
+    {
+        var count = request.ItemIds.Count;
+        var title = $"Adjusting folders ({count} {(request.IsSeries ? "series" : count == 1 ? "movie" : "movies")})";
+        return FolderQueue.Start(title, report => _service.Apply(request.ItemIds, request, CancellationToken.None, report), _logger);
+    }
+
+    /// <summary>Undo the last folder change in the background.</summary>
+    [HttpPost("FolderJobs/Undo")]
+    public ActionResult<FolderJob> StartUndoJob()
+        => FolderQueue.Start("Undoing the last folder change", report => _service.UndoLast(CancellationToken.None, report), _logger);
+
+    /// <summary>Rewind to before a history entry, in the background.</summary>
+    [HttpPost("FolderJobs/Rewind/{id}")]
+    public ActionResult<FolderJob> StartRewindJob([FromRoute] string id)
+        => FolderQueue.Start("Rewinding folder changes", report => _service.Rewind(id, CancellationToken.None, report), _logger);
+
+    [HttpGet("FolderJobs/{id}")]
+    public ActionResult<FolderJob> GetFolderJob([FromRoute] string id) => FolderQueue.Get(id) is { } job ? job : NotFound();
+
     /// <summary>Progress of an identify job.</summary>
     [HttpGet("IdentifyJobs/{id}")]
     public ActionResult<IdentifyJob> GetIdentifyJob([FromRoute] string id) =>

@@ -46,6 +46,10 @@
     background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.5); padding: .5em .7em;
     display: flex; gap: .6em; align-items: center; cursor: pointer; }
   #MovieCuratorPage .mc-dock[hidden] { display: none; }
+  #MovieCuratorPage .mc-dock { flex-direction: column; align-items: stretch; gap: .3em; cursor: default; }
+  #MovieCuratorPage .mc-dock-head { font-size: .75em; opacity: .75; }
+  #MovieCuratorPage .mc-dock-line { display: flex; gap: .6em; align-items: center; cursor: pointer; padding: .15em 0; }
+  #MovieCuratorPage .mc-dock-line + .mc-dock-line { border-top: 1px solid var(--mc-line); padding-top: .35em; }
   #MovieCuratorPage .mc-dock .mc-progress { flex: 1; min-width: 0; margin: 0; }
   #MovieCuratorPage .mc-dock .mc-progress-track { flex: 0 0 9em; }
   #MovieCuratorPage .mc-dock-title { font-size: .82em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
@@ -139,10 +143,9 @@
   <div id="mcList"></div>
 
   <!-- ============================================================ background task dock (window closed, work continues) -->
-  <div class="mc-dock" id="mcDock" hidden title="Click to show the details">
-    <span class="mc-dock-title" id="mcDockTitle"></span>
-    <div class="mc-progress" id="mcDockProgress"><div class="mc-progress-track"><div class="mc-progress-fill"></div></div><span class="mc-progress-text"></span></div>
-    <button is="emby-button" type="button" class="raised mc-btn mc-stop" hidden title="Click: finish the current item, then stop. Click again within 3 s: stop now and roll the current item back"><span>■ Stop</span></button>
+  <div class="mc-dock" id="mcDock" hidden>
+    <div class="mc-dock-head">Movie Curator · background jobs <span class="mc-meta">(keep running if you leave this page)</span></div>
+    <div id="mcDockList"></div>
   </div>
 
   <!-- ============================================================ identify modal -->
@@ -633,10 +636,6 @@
    * without total it's an animated "busy" bar (single server request); progress(sel, null) hides it.
    */
   function progress(sel, state) {
-    if (task && sel === task.sel && sel !== '#mcDockProgress') {
-      if (state) task.last = state;
-      if (!$('#mcDock').hidden) progress('#mcDockProgress', state || task.last);
-    }
     var el = $(sel);
     if (!el) return;
     if (!state) { el.hidden = true; return; }
@@ -647,62 +646,135 @@
     el.querySelector('.mc-progress-text').textContent = (indet ? '' : state.done + ' / ' + state.total + ' · ') + (state.text || '');
   }
 
-  // ---------------------------------------------------------------- background task (search / apply) + dock + stop
-  // Only one runs at a time. Closing its window doesn't stop it: the dock at the bottom shows its progress and
-  // reopens the window when clicked. Stop: click once = finish the current item, click again within 3 s = stop now.
-  var task = null; // { title, sel, modal, stop(force), last }
-  function startTask(t2) {
-    task = t2;
-    $$('.mc-stop').forEach(function (b) { b.hidden = false; disarm(b); });
-    syncDock();
+  // ---------------------------------------------------------------- background jobs
+  // Searching, applying matches and folder changes all run as jobs on the server. They keep going when this page
+  // or the browser tab is closed; whenever the page is open it lists them (floating bar at the bottom) and windows
+  // re-attach to them. Switching Movies / Series doesn't affect them.
+  var jobs = [];          // summaries from the server
+  var watchers = {};      // jobId -> { kind, onDetail(job), onDone(job) } for windows showing a job's details
+  var running = {};       // jobIds seen running (to notice when they finish)
+  var recentDone = {};    // jobId -> true: finished while this page was open (stays in the bar until dismissed)
+  var dismissed = {};
+  var armed = {};         // jobId -> time until which a second Stop click means "force"
+  var pollTimer = null;
+  var DETAIL = { search: 'SearchJobs/', identify: 'IdentifyJobs/', folders: 'FolderJobs/' };
+  var ICON = { search: '🔍', identify: '✍', folders: '📁' };
+
+  function pollJobs() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    var watched = Object.keys(watchers);
+    return api('GET', 'Jobs').then(function (list) {
+      jobs = list || [];
+      var finishedNow = [];
+      jobs.forEach(function (j) {
+        if (!j.finished) running[j.id] = true;
+        else if (running[j.id]) { delete running[j.id]; recentDone[j.id] = true; finishedNow.push(j); }
+      });
+      renderDock();
+      renderStops();
+      return Promise.all(Object.keys(watchers).map(function (id) {
+        var w = watchers[id];
+        return api('GET', DETAIL[w.kind] + id).then(function (d) {
+          if (w.onDetail) w.onDetail(d);
+          if (d.finished) { delete watchers[id]; if (w.onDone) w.onDone(d); }
+        }).catch(function () { /* next poll */ });
+      })).then(function () {
+        // a job nobody on this page was watching finished (e.g. started before a reload): refresh the list
+        if (finishedNow.some(function (j) { return watched.indexOf(j.id) < 0; })) load();
+      });
+    }).catch(function () { /* server busy: try again */ }).then(function () {
+      if (jobs.some(function (j) { return !j.finished; }) || Object.keys(watchers).length) pollTimer = setTimeout(pollJobs, 1000);
+    });
   }
-  function endTask() {
-    task = null;
-    $$('.mc-stop').forEach(function (b) { b.hidden = true; disarm(b); });
-    syncDock();
+  function watchJob(id, kind, onDetail, onDone) {
+    watchers[id] = { kind: kind, onDetail: onDetail, onDone: onDone };
+    running[id] = true;
+    pollJobs();
   }
-  function taskBusy() {
-    if (!task) return false;
-    Dashboard.alert('"' + task.title + '" is still running. Open it from the bar at the bottom (or wait for it to finish).');
-    return true;
+  function stopJob(kind, id, force) {
+    if (kind !== 'search' && kind !== 'identify') return;
+    api('POST', (kind === 'search' ? 'SearchJobs/' : 'IdentifyJobs/') + id + '/Stop?force=' + !!force).then(pollJobs).catch(function () {});
   }
-  function syncDock() {
-    var show = !!task && $(task.modal).hidden;
-    $('#mcDock').hidden = !show;
-    if (show) {
-      fitToContent();
-      $('#mcDockTitle').textContent = task.title;
-      if (task.last) progress('#mcDockProgress', task.last);
-    }
+  function jobById(id) { return jobs.filter(function (j) { return j.id === id; })[0]; }
+  function isArmed(id) { return (armed[id] || 0) > Date.now(); }
+  function stopLabel(id) {
+    var j = jobById(id);
+    return isArmed(id) ? '■ Force stop (click again)' : j && j.stopMode && !j.finished ? '■ Stopping…' : '■ Stop';
   }
-  function disarm(b) {
-    clearTimeout(b._mcTimer);
-    b.classList.remove('mc-armed');
-    b.querySelector('span').textContent = '■ Stop';
-    b._mcArmed = false;
+  function stopButton(j) {
+    return '<button is="emby-button" type="button" class="raised mc-btn mc-stop' + (isArmed(j.id) ? ' mc-armed' : '') +
+      '" data-job="' + j.id + '" data-kind="' + j.kind + '" title="Click: finish the current item, then stop. Click again within 3 s: stop now (an apply rolls the current item back)"><span>' + stopLabel(j.id) + '</span></button>';
   }
+  /** Stop buttons inside windows follow the job they're bound to. */
+  function renderStops() {
+    $$('.mc-modal .mc-stop').forEach(function (b) {
+      var id = b.getAttribute('data-job'), j = id && jobById(id);
+      b.hidden = !j || j.finished;
+      if (!b.hidden) {
+        b.classList.toggle('mc-armed', isArmed(id));
+        b.querySelector('span').textContent = stopLabel(id);
+      }
+    });
+  }
+  function bindStop(modalSel, id, kind) {
+    var b = $(modalSel + ' .mc-stop');
+    if (!b) return;
+    b.setAttribute('data-job', id);
+    b.setAttribute('data-kind', kind);
+    renderStops();
+  }
+  function unbindStop(modalSel) {
+    var b = $(modalSel + ' .mc-stop');
+    if (b) { b.removeAttribute('data-job'); b.hidden = true; }
+  }
+  function anyModalOpen() { return $$('.mc-modal').some(function (m) { return !m.hidden; }); }
+  function renderDock() {
+    var lines = jobs.filter(function (j) { return !j.finished || (recentDone[j.id] && !dismissed[j.id]); });
+    var dock = $('#mcDock');
+    dock.hidden = !lines.length || anyModalOpen();
+    if (dock.hidden) return;
+    fitToContent();
+    $('#mcDockList').innerHTML = lines.map(function (j) {
+      var pct = j.finished ? 100 : j.total ? Math.round(100 * j.done / j.total) : 0;
+      return '<div class="mc-dock-line" data-job="' + j.id + '" data-kind="' + j.kind + '" title="Click to show the details">' +
+        '<span class="mc-dock-title">' + esc((ICON[j.kind] || '') + ' ' + j.title) + '</span>' +
+        '<div class="mc-progress' + (j.total || j.finished ? '' : ' mc-indet') + '"><div class="mc-progress-track"><div class="mc-progress-fill" style="width:' +
+          pct + '%"></div></div><span class="mc-progress-text">' +
+          esc((j.total ? j.done + ' / ' + j.total + ' · ' : '') + (j.stopMode && !j.finished ? 'stopping… ' : '') + (j.current || '')) + '</span></div>' +
+        (j.canStop && !j.finished ? stopButton(j) : '') +
+        (j.finished ? '<a class="mc-link mc-dock-dismiss" title="Hide">✕</a>' : '') +
+      '</div>';
+    }).join('');
+  }
+  // Stop: first click = finish the current item; second click within 3 s = stop now
   page.addEventListener('click', function (e) {
     var b = e.target.closest('.mc-stop');
     if (!b) return;
     e.stopPropagation();
-    if (!task) return;
-    if (b._mcArmed) {
-      $$('.mc-stop').forEach(disarm);
-      task.stop(true);
-      return;
+    var id = b.getAttribute('data-job'), kind = b.getAttribute('data-kind');
+    if (!id) return;
+    if (isArmed(id)) { armed[id] = 0; stopJob(kind, id, true); }
+    else {
+      armed[id] = Date.now() + 3000;
+      stopJob(kind, id, false);
+      setTimeout(function () { renderDock(); renderStops(); }, 3050);
     }
-    task.stop(false);
-    $$('.mc-stop').forEach(function (x) {
-      x._mcArmed = true;
-      x.classList.add('mc-armed');
-      x.querySelector('span').textContent = '■ Force stop (click again)';
-      x._mcTimer = setTimeout(function () { disarm(x); if (task) x.querySelector('span').textContent = '■ Stopping…'; }, 3000);
-    });
+    renderDock();
+    renderStops();
   }, true);
   $('#mcDock').addEventListener('click', function (e) {
-    if (e.target.closest('.mc-stop') || !task) return;
-    showModal(task.modal);
+    var line = e.target.closest('.mc-dock-line');
+    if (!line || e.target.closest('.mc-stop')) return;
+    var id = line.getAttribute('data-job'), kind = line.getAttribute('data-kind');
+    if (e.target.closest('.mc-dock-dismiss')) { dismissed[id] = true; renderDock(); return; }
+    openJob(id, kind);
   });
+  /** Open the window that shows a job's details. */
+  function openJob(id, kind) {
+    if (kind === 'folders') { showModal('#mcHistory'); loadHistory(); return; }
+    openBatchForJob(id, kind);
+  }
 
   function load() {
     $('#mcSummary').textContent = 'Loading…';
@@ -720,11 +792,11 @@
   }
 
   // ---------------------------------------------------------------- modals
-  function showModal(id) { fitToContent(); $(id).hidden = false; document.body.style.overflow = 'hidden'; syncDock(); }
+  function showModal(id) { fitToContent(); $(id).hidden = false; document.body.style.overflow = 'hidden'; renderDock(); }
   function hideModal(id) {
     $(id).hidden = true;
     if (!$$('.mc-modal').some(function (m) { return !m.hidden; })) document.body.style.overflow = '';
-    syncDock();
+    renderDock();
   }
   $$('.mc-modal').forEach(function (m) {
     m.addEventListener('click', function (e) {
@@ -858,36 +930,17 @@
    */
   /**
    * Apply picked matches as a server-side job: entries = [{ p, result, replaceImages }]. The cached search results are
-   * sent once (no re-search); the server does unlock → remove NFO → apply → new NFO → lock → verify per item, so slow
-   * metadata downloads can't hit a proxy timeout. onUpdate(job) is called on every poll; resolves with the final job.
+   * sent once (no re-search); the server does unlock → remove NFO → apply → new NFO → lock → verify per item.
+   * Resolves with the job; follow it with watchJob(job.id, 'identify', ...).
    */
-  function runIdentifyJob(entries, onUpdate, onStart) {
-    var body = {
+  function startIdentifyJob(entries) {
+    return api('POST', 'IdentifyJobs', {
+      type: type,
       items: entries.map(function (e) {
         return { itemId: e.p.itemId, name: e.p.jellyfinName, result: e.result, replaceImages: e.replaceImages !== false };
       }),
       lockAfter: $('#mcLockAfter').checked, writeNfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
-    };
-    return api('POST', 'IdentifyJobs', body).then(function (job) {
-      if (onStart) onStart(job.id);
-      return new Promise(function (resolve, reject) {
-        var misses = 0;
-        (function poll() {
-          api('GET', 'IdentifyJobs/' + job.id).then(function (j) {
-            misses = 0;
-            if (onUpdate) onUpdate(j);
-            if (j.finished) resolve(j); else setTimeout(poll, 1000);
-          }).catch(function (e) {
-            // a dropped poll is fine (the job keeps running on the server); give up after ~30 s of failures
-            if (++misses > 30) reject(e); else setTimeout(poll, 1000);
-          });
-        })();
-      });
     });
-  }
-  function stopJob(jobId, force) {
-    if (!jobId) return;
-    api('POST', 'IdentifyJobs/' + jobId + '/Stop?force=' + !!force).catch(function () { /* next poll shows the state */ });
   }
   function jobStatusText(x) {
     switch (x.status) {
@@ -899,25 +952,18 @@
       default: return 'queued…';
     }
   }
-  function jobProgress(sel, j) {
-    var cur = j.items.filter(function (x) { return x.status === 'running'; })[0];
-    var frac = cur ? (cur.stepIndex || 0) / (j.steps || 6) : 0;
-    progress(sel, {
-      done: j.done, total: j.total,
-      text: cur ? (cur.name || '') + ' → ' + (cur.match || '') + ' · ' + (cur.step || '') + ' (' + (cur.stepIndex || 0) + '/' + (j.steps || 6) + ')'
-        : (j.finished ? 'done' : 'queued (waiting for another job to finish)…')
-    });
-    // let the bar move within the current item too
-    var fill = $(sel + ' .mc-progress-fill');
-    if (fill && j.total) fill.style.width = Math.round(100 * (j.done + frac) / j.total) + '%';
-  }
 
   /**
    * mode 'apply': Re-identify a row (Apply syncs to Jellyfin straight away).
    * mode 'pick' : manual search for batch row `index` (Use this puts the result into the batch table).
    */
+  var identifyItem = null; // the item the search window is for
   function openIdentify(id, mode, index) {
-    var p = itemById(id), b = mode === 'pick' ? batch[index] : null;
+    var b = mode === 'pick' ? batch[index] : null;
+    var p = itemById(id) || (b ? { itemId: b.id, jellyfinName: b.title || b.query, kind: batchType === 'series' ? 'series' : 'movie',
+      path: b.path, root: b.root, providerIds: {} } : null);
+    if (!p) return;
+    identifyItem = p;
     identifyId = id;
     identifyMode = mode || 'apply';
     pickIndex = b ? index : null;
@@ -941,7 +987,7 @@
 
   var lastResults = [];
   function runIdentifySearch() {
-    var p = itemById(identifyId);
+    var p = identifyItem || itemById(identifyId);
     var info = { Name: $('#mcIdName').value.trim(), ProviderIds: {} };
     var y = $('#mcIdYear').value.trim();
     if (/^\d{4}$/.test(y)) info.Year = parseInt(y, 10);
@@ -977,7 +1023,7 @@
   $('#mcIdResults').addEventListener('click', function (e) {
     var b = e.target.closest('.mc-apply-result');
     if (!b) return;
-    var p = itemById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
+    var p = identifyItem || itemById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
     if (identifyMode === 'pick') {
       // put the chosen result into the batch row; nothing is applied until "Apply checked"
       var row = batch[pickIndex];
@@ -998,37 +1044,44 @@
     }
     $('#mcIdStatus').textContent = 'Applying "' + r.Name + '"…';
     $$('.mc-apply-result').forEach(function (x) { x.disabled = true; });
-    if (taskBusy()) { $$('.mc-apply-result').forEach(function (x) { x.disabled = false; }); return; }
-    var jobId = null;
-    startTask({ title: 'Applying ' + r.Name, sel: '#mcIdProgress', modal: '#mcIdentify', stop: function (force) { stopJob(jobId, force); } });
-    runIdentifyJob([{ p: p, result: r, replaceImages: $('#mcIdImages').checked }], function (j) {
-      var it = j.items[0];
-      progress('#mcIdProgress', { done: it.stepIndex || 0, total: j.steps || 6, text: r.Name + ' · ' + (it.step || 'queued…') });
-    }, function (id) { jobId = id; }).then(function (j) {
-      progress('#mcIdProgress', null);
-      endTask();
-      var it = j.items[0];
-      if (it.status === 'failed') throw new Error(it.error || 'failed');
-      if (it.status === 'cancelled' || it.status === 'rolledback') {
-        $('#mcIdStatus').textContent = 'Stopped: ' + jobStatusText(it);
-        $$('.mc-apply-result').forEach(function (x) { x.disabled = false; });
-        return load();
-      }
-      hideModal('#mcIdentify');
-      return load();
+    startIdentifyJob([{ p: p, result: r, replaceImages: $('#mcIdImages').checked }]).then(function (job) {
+      bindStop('#mcIdentify', job.id, 'identify');
+      watchJob(job.id, 'identify', function (j) {
+        var it = j.items[0];
+        progress('#mcIdProgress', { done: it.stepIndex || 0, total: j.steps || 6, text: r.Name + ' · ' + (it.step || 'queued (another job is running)…') });
+      }, function (j) {
+        progress('#mcIdProgress', null);
+        unbindStop('#mcIdentify');
+        var it = j.items[0];
+        if (it.status === 'done') {
+          if (!$('#mcIdentify').hidden && identifyItem && identifyItem.itemId === p.itemId) hideModal('#mcIdentify');
+        } else {
+          $('#mcIdStatus').textContent = it.status === 'failed' ? 'Could not apply: ' + (it.error || 'failed') : 'Stopped: ' + jobStatusText(it);
+          $$('.mc-apply-result').forEach(function (x) { x.disabled = false; });
+        }
+        load();
+      });
     }).catch(function (err) {
-      progress('#mcIdProgress', null);
-      endTask();
       $('#mcIdStatus').textContent = 'Could not apply: ' + err.message;
       $$('.mc-apply-result').forEach(function (x) { x.disabled = false; });
     });
   });
 
-  // ---------------------------------------------------------------- batch identify
+  // ---------------------------------------------------------------- batch identify (search + apply run as server jobs)
+  var batchJob = null;   // { id, kind: 'search' | 'identify' } the job the batch window is showing
+  var batchType = type;  // movies | series of the rows in the batch window
+  function rowInfo(b) {
+    var p = itemById(b.id);
+    return {
+      title: p ? p.jellyfinName : (b.title || b.query || b.id),
+      year: p ? p.year : '',
+      where: p ? where(p) : (b.path ? short(b.path, b.root || '') + (batchType === 'series' ? '/' : '') : '')
+    };
+  }
   function renderBatch() {
     $('#mcBatchList').innerHTML = batch.map(function (b, i) {
-      var p = planById(b.id), r = b.results && b.results[b.pick];
-      var choice = b.results === null ? '<span class="mc-meta">Searching…</span>'
+      var info = rowInfo(b), r = b.results && b.results[b.pick];
+      var choice = b.results === null ? '<span class="mc-meta">' + (b.status && b.status.indexOf('…') === 0 ? 'Searching…' : 'Waiting…') + '</span>'
         : !b.results.length ? '<span class="mc-meta">No results. Try 🔍 Manual search.</span>'
         : '<select class="mc-text mc-batch-pick" data-i="' + i + '">' + b.results.slice(0, 8).map(function (x, j) {
             return '<option value="' + j + '"' + (j === b.pick ? ' selected' : '') + '>' + esc(x.Name) + ' (' + (x.ProductionYear || '?') + ') · ' + esc(x.SearchProviderName || '') + '</option>';
@@ -1036,13 +1089,13 @@
       return '<div class="mc-batch-row">' +
         '<input type="checkbox" class="mc-batch-check" data-i="' + i + '"' + (b.checked ? ' checked' : '') + (r ? '' : ' disabled') + '>' +
         '<img alt="" src="' + esc(poster(b.id, 140)) + '" onerror="this.style.visibility=\'hidden\'">' +
-        '<div><b>' + esc(p ? p.jellyfinName : b.id) + '</b> <span class="mc-meta">(' + esc(p && p.year || '?') + ')</span>' +
-          '<div class="mc-where">📁 ' + esc(where(p)) + '</div>' +
+        '<div><b>' + esc(info.title) + '</b>' + (info.year ? ' <span class="mc-meta">(' + esc(info.year) + ')</span>' : '') +
+          (info.where ? '<div class="mc-where">📁 ' + esc(info.where) + '</div>' : '') +
           '<div class="mc-meta">' + (b.manual ? '<span class="mc-tag info">manual pick</span> ' : 'searched: ') +
-            esc(b.query) + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
+            esc(b.query || '') + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-batch-manual" data-i="' + i + '" style="margin-top:.3em">' +
             '<span>🔍 Manual search…</span></button>' +
-          (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
+          (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 || b.status.indexOf('…') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
         '<span class="mc-arrow">→</span>' +
         (r && r.ImageUrl ? '<img alt="" src="' + esc(r.ImageUrl) + '">' : '<img alt="" style="visibility:hidden">') +
         '<div>' + choice + '</div>' +
@@ -1054,93 +1107,109 @@
     all.checked = pickable > 0 && n === pickable;
     all.indeterminate = n > 0 && n < pickable;
     all.disabled = !pickable;
-    $('#mcBatchApply').disabled = !n;
+    var applying = batchJob && batchJob.kind === 'identify' && (jobById(batchJob.id) || {}).finished === false;
+    $('#mcBatchApply').disabled = !n || applying;
     $('#mcBatchApply').querySelector('span').textContent = 'Apply checked (' + n + ')';
   }
 
-  var batchRun = 0;
-  function runBatchSearch() {
-    if (task) { if (task.modal !== '#mcBatch' || task.kind !== 'search') { taskBusy(); return; } task.stop(true); }
-    var run = ++batchRun, providers = chosenSources(), softStop = false, current = null;
-    // rows you filled by manual search keep their pick
-    var todo = batch.filter(function (b) { return !b.manual; });
-    todo.forEach(function (b) { b.results = null; b.pick = 0; b.checked = false; b.confident = false; b.status = ''; });
-    $('#mcBatchStatus').textContent = 'Searching ' + batch.length + ' item(s) on ' + providers.join(', ') + '…';
-    renderBatch();
-    var queue = todo.slice(), totals = {}, done = 0;
-    function finish(text) {
-      progress('#mcBatchProgress', null);
-      endTask();
-      $('#mcBatchStatus').textContent = text;
-      renderBatch();
-    }
-    startTask({
-      title: 'Searching matches', kind: 'search', sel: '#mcBatchProgress', modal: '#mcBatch',
-      stop: function (force) {
-        if (!force) { softStop = true; $('#mcBatchStatus').textContent = 'Stopping after the current row…'; return; }
-        batchRun++; // abandon the running row now
-        if (current) { current.results = []; current.status = 'stopped (not searched)'; }
-        queue.forEach(function (b) { b.results = []; b.status = 'not searched (stopped)'; });
-        queue.length = 0;
-        finish('Stopped. Rows that were searched keep their results.');
+  function rowFor(id, seed) {
+    var b = batch.filter(function (x) { return x.id === id; })[0];
+    if (!b) { b = Object.assign({ id: id, results: null, pick: 0, checked: false, status: '' }, seed); batch.push(b); }
+    return b;
+  }
+  function countsFrom(c) {
+    var out = {};
+    Object.keys(c || {}).forEach(function (k) { out[k] = c[k] < 0 ? 'error' : c[k]; });
+    return out;
+  }
+  /** Show a search job's progress and results in the batch window. */
+  function applySearchDetail(j) {
+    if (!batchJob || batchJob.id !== j.id) return;
+    batchType = j.type || batchType;
+    j.items.forEach(function (x) {
+      var b = rowFor(x.itemId, { title: x.title, path: x.path, root: x.root, query: x.query, year: x.year || '' });
+      if (b.manual) return;
+      if (x.status === 'done' && b.results === null) {
+        b.results = x.results || [];
+        var best = bestMatch(b.results, b.query, b.year);
+        b.pick = best == null ? 0 : best;
+        b.confident = best != null;
+        b.checked = false; // nothing is pre-selected
+        b.status = b.results.length ? '' : 'No results (' + countsText(countsFrom(x.counts)) + ')';
+      } else if (x.status === 'stopped' && b.results === null) {
+        b.results = [];
+        b.status = 'not searched (stopped)';
+      } else if (x.status === 'running') {
+        b.status = '… searching ' + (x.current || '');
       }
     });
-    // strictly sequential, top to bottom: one row's sources finish before the next row starts
-    function next() {
-      if (run !== batchRun) return Promise.resolve();
-      if (softStop) {
-        queue.forEach(function (x) { x.results = []; x.status = 'not searched (stopped)'; });
-        queue.length = 0;
-      }
-      var b = queue.shift();
-      if (!b) return Promise.resolve();
-      current = b;
-      var p = planById(b.id);
-      done++;
-      $('#mcBatchStatus').textContent = 'Searching ' + done + ' of ' + todo.length + ': ' + (p ? p.jellyfinName : b.query) +
-        ' (' + providers.join(', ') + ')…';
-      var rowName = p ? p.jellyfinName : b.query;
-      return searchSources(p, queryInfo(b.query, b.year), providers, function (name, k, n) {
-        if (run === batchRun) {
-          progress('#mcBatchProgress', { done: done - 1, total: todo.length, text: rowName + ' · ' + name + ' (' + k + '/' + n + ')' });
-        }
-      })
-        .then(function (found) {
-          if (run !== batchRun) return;
-          Object.keys(found.counts).forEach(function (k) {
-            totals[k] = totals[k] || { hits: 0, failed: 0 };
-            if (found.counts[k] === 'error') totals[k].failed++; else if (found.counts[k] > 0) totals[k].hits++;
-          });
-          b.results = found.results;
-          var best = bestMatch(found.results, b.query, b.year);
-          b.pick = best == null ? 0 : best;
-          b.confident = best != null;
-          b.checked = false; // nothing is pre-selected; confident matches are only highlighted
-        })
-        .then(function () { if (run === batchRun) renderBatch(); return next(); });
-    }
-    next().then(function () {
-      if (run !== batchRun) return;
-      var c = batch.filter(function (b) { return b.confident; }).length;
-      finish((softStop ? 'Stopped. ' : '') + c + ' of ' + batch.length + ' have a confident match. Review, then Apply checked. Sources: ' +
-        Object.keys(totals).map(function (k) {
-          return k + ' matched ' + totals[k].hits + (totals[k].failed ? ', failed ' + totals[k].failed : '');
-        }).join(' · '));
+    var cur = j.items.filter(function (x) { return x.status === 'running'; })[0];
+    progress('#mcBatchProgress', j.finished ? null : {
+      done: j.done, total: j.total, text: cur ? (cur.title || cur.query) + ' · ' + (cur.current || '') : 'queued (another search is running)…'
+    });
+    $('#mcBatchStatus').textContent = j.finished
+      ? (j.stopMode ? 'Stopped. ' : '') + batch.filter(function (b) { return b.confident; }).length + ' of ' + batch.length +
+        ' have a confident match. Tick the rows to apply (or Select all).'
+      : 'Searching on ' + (j.providers || []).join(', ') + '. This runs on the server: you can close this window or the tab.';
+    renderBatch();
+  }
+  /** Show an apply (identify) job's progress per row in the batch window. */
+  function applyIdentifyDetail(j) {
+    if (!batchJob || batchJob.id !== j.id) return;
+    batchType = (j.type || batchType);
+    j.items.forEach(function (x) {
+      var b = rowFor(x.itemId, { title: x.name, query: x.name, results: [{ Name: x.match }] });
+      b.status = jobStatusText(x);
+      if (x.status === 'done') b.checked = false;
+    });
+    var cur = j.items.filter(function (x) { return x.status === 'running'; })[0];
+    var frac = cur ? (cur.stepIndex || 0) / (j.steps || 6) : 0;
+    progress('#mcBatchProgress', j.finished ? null : {
+      done: j.done, total: j.total,
+      text: cur ? (cur.name || '') + ' → ' + (cur.match || '') + ' · ' + (cur.step || '') + ' (' + (cur.stepIndex || 0) + '/' + (j.steps || 6) + ')'
+        : 'queued (another job is running)…'
+    });
+    var fill = $('#mcBatchProgress .mc-progress-fill');
+    if (fill && !j.finished && j.total) fill.style.width = Math.round(100 * (j.done + frac) / j.total) + '%';
+    var applied = j.items.filter(function (x) { return x.status === 'done'; }).length;
+    $('#mcBatchStatus').textContent = j.finished
+      ? (j.stopMode ? 'Stopped. ' : 'Done. ') + applied + ' applied' + (j.failed ? ', ' + j.failed + ' failed' : '') +
+        (j.cancelled ? ', ' + j.cancelled + ' not applied / rolled back' : '') + ' (see rows).'
+      : 'Applying ' + j.total + ' match(es) on the server: you can close this window or the tab.';
+    renderBatch();
+  }
+  function bindBatch(id, kind) {
+    batchJob = { id: id, kind: kind };
+    bindStop('#mcBatch', id, kind);
+  }
+  function watchBatchJob(id, kind) {
+    var show = kind === 'search' ? applySearchDetail : applyIdentifyDetail;
+    watchJob(id, kind, show, function (j) {
+      show(j);
+      if (batchJob && batchJob.id === j.id) unbindStop('#mcBatch');
+      if (kind === 'identify') load();
+      renderBatch();
     });
   }
-
-  $('#mcBatchIdentify').addEventListener('click', function () {
-    var ids = selectedIds();
-    if (!ids.length) return;
-    if (task) { if (task.modal === '#mcBatch') showModal('#mcBatch'); else taskBusy(); return; }
-    batch = ids.map(function (id) {
-      var p = planById(id);
-      return { id: id, query: p.guessName || p.jellyfinName, year: p.guessYear || '', results: null, pick: 0, checked: false };
-    });
+  /** Re-open the batch window for a job (e.g. from the floating bar, after the page was closed). */
+  function openBatchForJob(id, kind) {
+    if (!batchJob || batchJob.id !== id) {
+      batch = []; // rows come back from the server
+      batchJob = { id: id, kind: kind };
+      $('#mcBatchList').innerHTML = '<p class="mc-meta" style="padding:1em">Loading…</p>';
+    }
     showModal('#mcBatch');
-    loadSources().then(function () { renderPickers(); runBatchSearch(); });
-  });
-  $('#mcBatchSearch').addEventListener('click', runBatchSearch);
+    loadSources().then(renderPickers);
+    api('GET', DETAIL[kind] + id).then(function (j) {
+      (kind === 'search' ? applySearchDetail : applyIdentifyDetail)(j);
+      if (!j.finished) {
+        bindStop('#mcBatch', id, kind);
+        if (!watchers[id]) watchBatchJob(id, kind);
+      } else {
+        unbindStop('#mcBatch');
+      }
+    }).catch(function (e) { $('#mcBatchStatus').textContent = 'That job is no longer available: ' + e.message; });
+  }
 
   /** Build SearchInfo from a typed query: a title, or an ID like tt1234567 / tmdb:123 / tvdb:123. */
   function queryInfo(q, y) {
@@ -1154,6 +1223,46 @@
     return info;
   }
 
+  /** Search every non-manual row on the server (one row and one source at a time, throttled). */
+  function startBatchSearch() {
+    var providers = chosenSources();
+    var todo = batch.filter(function (b) { return !b.manual; });
+    if (batchJob && batchJob.kind === 'search' && (jobById(batchJob.id) || {}).finished === false) stopJob('search', batchJob.id, true);
+    todo.forEach(function (b) { b.results = null; b.pick = 0; b.checked = false; b.confident = false; b.status = 'queued'; });
+    renderBatch();
+    if (!todo.length) return;
+    $('#mcBatchStatus').textContent = 'Starting the search on the server…';
+    api('POST', 'SearchJobs', {
+      type: batchType, providers: providers,
+      items: todo.map(function (b) {
+        var info = queryInfo(b.query, b.year), p = itemById(b.id);
+        return {
+          itemId: b.id, kind: batchType === 'series' ? 'series' : 'movie', query: info.Name, year: info.Year || null,
+          providerIds: info.ProviderIds, title: p ? p.jellyfinName : b.title, path: p ? p.path : b.path, root: p ? p.root : b.root
+        };
+      })
+    }).then(function (job) {
+      bindBatch(job.id, 'search');
+      watchBatchJob(job.id, 'search');
+    }).catch(function (e) { $('#mcBatchStatus').textContent = 'Could not start the search: ' + e.message; });
+  }
+
+  $('#mcBatchIdentify').addEventListener('click', function () {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    batchType = type;
+    batchJob = null;
+    unbindStop('#mcBatch');
+    batch = ids.map(function (id) {
+      var p = planById(id);
+      return { id: id, title: p.jellyfinName, path: p.path, root: p.root, query: p.guessName || p.jellyfinName, year: p.guessYear || '',
+        results: null, pick: 0, checked: false };
+    });
+    showModal('#mcBatch');
+    loadSources().then(function () { renderPickers(); startBatchSearch(); });
+  });
+  $('#mcBatchSearch').addEventListener('click', startBatchSearch);
+
   $('#mcBatchAll').addEventListener('change', function (e) {
     batch.forEach(function (b) { if (b.results && b.results[b.pick]) b.checked = e.target.checked; });
     renderBatch();
@@ -1164,7 +1273,6 @@
     var i = parseInt(btn.getAttribute('data-i'), 10);
     openIdentify(batch[i].id, 'pick', i);
   });
-
   $('#mcBatchList').addEventListener('change', function (e) {
     var i = parseInt(e.target.getAttribute('data-i'), 10);
     if (e.target.classList.contains('mc-batch-check')) batch[i].checked = e.target.checked;
@@ -1174,44 +1282,18 @@
 
   $('#mcBatchApply').addEventListener('click', function () {
     var todo = batch.filter(function (b) { return b.checked && b.results && b.results[b.pick]; });
-    if (!todo.length || taskBusy()) return;
+    if (!todo.length) return;
     $('#mcBatchApply').disabled = true;
-    var jobId = null;
-    startTask({
-      title: 'Applying ' + todo.length + ' match(es)', kind: 'apply', sel: '#mcBatchProgress', modal: '#mcBatch',
-      stop: function (force) {
-        stopJob(jobId, force);
-        $('#mcBatchStatus').textContent = force ? 'Force stopping: rolling back the current item…' : 'Stopping after the current item…';
-      }
-    });
-    $('#mcBatchStatus').textContent = 'Applying ' + todo.length + ' match(es) on the server (you can close this window; it keeps going)…';
     todo.forEach(function (b) { b.status = 'queued…'; });
     renderBatch();
-    var entries = todo.map(function (b) { return { p: itemById(b.id), result: b.results[b.pick], replaceImages: true }; });
-    function sync(j) {
-      jobProgress('#mcBatchProgress', j);
-      j.items.forEach(function (x) {
-        var b = todo.filter(function (t) { return t.id === x.itemId; })[0];
-        if (!b) return;
-        b.status = jobStatusText(x);
-        if (x.status === 'done') b.checked = false;
-      });
-      renderBatch();
-    }
-    runIdentifyJob(entries, sync, function (id) { jobId = id; }).then(function (j) {
-      sync(j);
-      endTask();
-      setTimeout(function () { progress('#mcBatchProgress', null); }, 1500);
-      var applied = j.items.filter(function (x) { return x.status === 'done'; }).length;
-      $('#mcBatchStatus').textContent = (j.stopMode ? 'Stopped. ' : 'Done. ') + applied + ' applied' +
-        (j.failed ? ', ' + j.failed + ' failed' : '') + (j.cancelled ? ', ' + j.cancelled + ' not applied / rolled back' : '') +
-        ' (see rows). Close this window to see the updated list.';
-      $('#mcBatchApply').disabled = false;
-      return load();
+    startIdentifyJob(todo.map(function (b) {
+      return { p: itemById(b.id) || { itemId: b.id, jellyfinName: b.title || b.query }, result: b.results[b.pick], replaceImages: true };
+    })).then(function (job) {
+      bindBatch(job.id, 'identify');
+      watchBatchJob(job.id, 'identify');
     }).catch(function (e) {
-      endTask();
-      progress('#mcBatchProgress', null);
-      $('#mcBatchStatus').textContent = 'Lost contact with the server: ' + e.message + '. The job may still be running; refresh later.';
+      $('#mcBatchApply').disabled = false;
+      $('#mcBatchStatus').textContent = 'Could not start: ' + e.message;
     });
   });
 
@@ -1380,14 +1462,19 @@
     var nOps = ids.reduce(function (n, id) { return n + planById(id).ops.length; }, 0);
     if (!confirm('Apply ' + nOps + ' folder/file change(s) to ' + noun(ids.length) + '?\nYou can undo with "Undo last folder change".')) return;
     var body = opts(); body.itemIds = ids;
-    $('#mcSummary').textContent = 'Applying…';
-    progress('#mcProgress', { text: 'Applying ' + nOps + ' folder/file change(s) to ' + noun(ids.length) + ' on the server…' });
-    api('POST', 'Apply', body).then(function (r) {
-      progress('#mcProgress', null);
+    progress('#mcProgress', { text: 'Starting ' + nOps + ' folder/file change(s) on the server…' });
+    api('POST', 'FolderJobs/Apply', body).then(function (job) {
       selected = {};
-      Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\nA library scan has started.');
-      return load();
-    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Apply failed: ' + e.message); load(); });
+      render();
+      watchJob(job.id, 'folders', function (j) {
+        progress('#mcProgress', j.finished ? null : { done: j.done, total: j.total || nOps, text: j.current || 'queued (another folder job is running)…' });
+      }, function (j) {
+        progress('#mcProgress', null);
+        var r = j.result || { done: 0, errors: ['no result'] };
+        Dashboard.alert('Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\nA library scan has started.');
+        load();
+      });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Could not start: ' + e.message); });
   });
 
   // ---------------------------------------------------------------- folder change history (undo / rewind)
@@ -1426,18 +1513,25 @@
     return api('GET', 'History').then(function (h) { history = h; renderHistory(); })
       .catch(function (e) { $('#mcHistList').innerHTML = '<p class="mc-warn" style="padding:1em">Could not load history: ' + esc(e.message) + '</p>'; });
   }
-  function afterUndo(r, what) {
-    progress('#mcHistProgress', null);
-    Dashboard.alert(what + ': ' + r.done + ' change(s) reversed.' + (r.errors.length ? '\n\nProblems:\n' + r.errors.join('\n') : '') +
-      '\n\nA library scan has started.');
-    return loadHistory().then(load);
+  /** Run an undo / rewind as a folder job and show its progress in the history window. */
+  function runFolderJob(path, what) {
+    progress('#mcHistProgress', { text: what + '…' });
+    return api('POST', path).then(function (job) {
+      watchJob(job.id, 'folders', function (j) {
+        progress('#mcHistProgress', j.finished ? null : { done: j.done, total: j.total || 1, text: j.current || 'queued…' });
+      }, function (j) {
+        progress('#mcHistProgress', null);
+        var r = j.result || { done: 0, errors: ['no result'] };
+        Dashboard.alert(what + ': ' + r.done + ' change(s) reversed.' + (r.errors.length ? '\n\nProblems:\n' + r.errors.join('\n') : '') +
+          '\n\nA library scan has started.');
+        loadHistory().then(load);
+      });
+    }).catch(function (e) { progress('#mcHistProgress', null); Dashboard.alert(what + ' failed: ' + e.message); });
   }
   $('#mcUndo').addEventListener('click', function () { showModal('#mcHistory'); loadHistory(); });
   $('#mcHistUndoLast').addEventListener('click', function () {
     if (!confirm('Undo the most recent folder change?')) return;
-    progress('#mcHistProgress', { text: 'Undoing the last folder change…' });
-    api('POST', 'Undo').then(function (r) { return afterUndo(r, 'Undone'); })
-      .catch(function (e) { progress('#mcHistProgress', null); Dashboard.alert('Undo failed: ' + e.message); });
+    runFolderJob('FolderJobs/Undo', 'Undo');
   });
   $('#mcHistList').addEventListener('click', function (e) {
     var rowEl = e.target.closest('[data-hist]');
@@ -1450,9 +1544,7 @@
     var n = runs.reduce(function (s, h) { return s + h.total; }, 0);
     if (!confirm('Rewind to before ' + fmtTime(target.time) + '?\n\nThis undoes ' + runs.length + ' folder change run(s) (' + n +
         ' changes), newest first. Files go back where they were and NFOs those runs created are removed.')) return;
-    progress('#mcHistProgress', { text: 'Rewinding ' + runs.length + ' folder change run(s)…' });
-    api('POST', 'History/' + encodeURIComponent(id) + '/Rewind').then(function (r) { return afterUndo(r, 'Rewound'); })
-      .catch(function (err) { progress('#mcHistProgress', null); Dashboard.alert('Rewind failed: ' + err.message); });
+    runFolderJob('FolderJobs/Rewind/' + encodeURIComponent(id), 'Rewind');
   });
 
   // ---------------------------------------------------------------- row events
@@ -1536,6 +1628,8 @@
     $$('.mc-modal').forEach(function (m) { m.hidden = true; });
     $('#mcDock').hidden = true;
     document.body.style.overflow = '';
+    clearTimeout(pollTimer); // jobs keep running on the server; polling resumes when the page is shown again
+    pollTimer = null;
   }
   ['pagehide', 'viewbeforehide', 'viewhide'].forEach(function (ev) { page.addEventListener(ev, releaseBody); });
 
@@ -1543,8 +1637,8 @@
     themeBackground();
     stickyOffset();
     fitToContent();
-    syncDock();
     syncTypeVisibility();
+    pollJobs(); // re-attach: show jobs that kept running while the page was closed
     renderFilterMenu();
     load();
   });

@@ -1733,15 +1733,20 @@ public class CuratorService
         await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
     }
 
-    public async Task<ApplyResult> Apply(IReadOnlyCollection<string> itemIds, PlanOptions opt, CancellationToken ct)
+    public async Task<ApplyResult> Apply(IReadOnlyCollection<string> itemIds, PlanOptions opt, CancellationToken ct, Action<int, int, string>? report = null)
     {
         var result = new ApplyResult();
         var log = new List<PlanOp>();
         var wanted = itemIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var plan in BuildPlan(opt).Where(p => wanted.Contains(p.ItemId)))
+        var selected = BuildPlan(opt).Where(p => wanted.Contains(p.ItemId)).ToList();
+        var total = selected.Sum(p => p.Ops.Count);
+        var n = 0;
+        report?.Invoke(0, total, "starting");
+        foreach (var plan in selected)
         {
             foreach (var op in plan.Ops)
             {
+                report?.Invoke(++n, total, $"{plan.Title}: {op.Kind} {System.IO.Path.GetFileName(op.To)}");
                 try
                 {
                     switch (op.Kind)
@@ -1847,7 +1852,7 @@ public class CuratorService
     }
 
     /// <summary>Undo the most recent folder change that hasn't been undone yet.</summary>
-    public async Task<ApplyResult> UndoLast(CancellationToken ct)
+    public async Task<ApplyResult> UndoLast(CancellationToken ct, Action<int, int, string>? report = null)
     {
         var last = Directory.Exists(LogDir)
             ? Directory.GetFiles(LogDir, "apply-*.json").OrderBy(f => f, StringComparer.Ordinal).LastOrDefault()
@@ -1857,7 +1862,9 @@ public class CuratorService
             return new ApplyResult { Errors = { "Nothing to undo." } };
         }
 
-        var result = await UndoLog(last, ct).ConfigureAwait(false);
+        var lastTotal = CountOps(last);
+        var lastN = 0;
+        var result = await UndoLog(last, ct, text => report?.Invoke(++lastN, lastTotal, text)).ConfigureAwait(false);
         PruneHistory();
         QueueScan();
         return result;
@@ -1866,7 +1873,7 @@ public class CuratorService
     /// <summary>
     /// Rewind to just before folder change <paramref name="id"/>: undo it and every applied change after it, newest first.
     /// </summary>
-    public async Task<ApplyResult> Rewind(string id, CancellationToken ct)
+    public async Task<ApplyResult> Rewind(string id, CancellationToken ct, Action<int, int, string>? report = null)
     {
         if (!LogName.IsMatch(id ?? string.Empty) || !Directory.Exists(LogDir))
         {
@@ -1884,9 +1891,11 @@ public class CuratorService
             return total;
         }
 
+        var rewindTotal = logs.Sum(CountOps);
+        var rewindN = 0;
         foreach (var log in logs)
         {
-            var r = await UndoLog(log, ct).ConfigureAwait(false);
+            var r = await UndoLog(log, ct, text => report?.Invoke(++rewindN, rewindTotal, text)).ConfigureAwait(false);
             total.Done += r.Done;
             total.Errors.AddRange(r.Errors);
         }
@@ -1899,12 +1908,25 @@ public class CuratorService
     }
 
     /// <summary>Reverse one apply log (newest operation first) and mark it undone.</summary>
-    private async Task<ApplyResult> UndoLog(string file, CancellationToken ct)
+    private static int CountOps(string file)
+    {
+        try
+        {
+            return (JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(file)) ?? new()).Count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    private async Task<ApplyResult> UndoLog(string file, CancellationToken ct, Action<string>? onOp = null)
     {
         var result = new ApplyResult();
         var log = JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(file)) ?? new();
         foreach (var op in Enumerable.Reverse(log))
         {
+            onOp?.Invoke("undo " + op.Kind + " " + System.IO.Path.GetFileName(op.To));
             try
             {
                 switch (op.Kind)

@@ -32,6 +32,9 @@ public class IdentifyJobRequest
     [JsonPropertyName("writeNfo")] public bool WriteNfo { get; set; } = true;
 
     [JsonPropertyName("lockNfo")] public bool LockNfo { get; set; } = true;
+
+    /// <summary>movies | series (for the job list).</summary>
+    [JsonPropertyName("type")] public string Type { get; set; } = "movies";
 }
 
 public class IdentifyJobItem
@@ -56,7 +59,7 @@ public class IdentifyJobItem
     [JsonIgnore] public bool ReplaceImages { get; set; } = true;
 }
 
-public class IdentifyJob
+public class IdentifyJob : ICuratorJob
 {
     [JsonPropertyName("id")] public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
@@ -83,6 +86,26 @@ public class IdentifyJob
     [JsonIgnore] public IdentifyJobRequest Options { get; set; } = new();
 
     [JsonIgnore] public CancellationTokenSource Cancel { get; } = new();
+
+    public JobSummary Summary()
+    {
+        var cur = Items.FirstOrDefault(i => i.Status == "running");
+        return new JobSummary
+        {
+            Id = Id,
+            Kind = "identify",
+            Title = Items.Count == 1 ? $"Applying {Items[0].Match}" : $"Applying {Items.Count} matches",
+            Type = Options.Type,
+            Total = Total,
+            Done = Done,
+            Failed = Failed,
+            Finished = Finished,
+            StopMode = StopMode,
+            CanStop = !Finished,
+            Current = cur == null ? (Finished ? "done" : "queued") : $"{cur.Name} → {cur.Match} · {cur.Step} ({cur.StepIndex}/{Steps})",
+            Created = JobRegistry.Iso(Created),
+        };
+    }
 }
 
 /// <summary>
@@ -117,6 +140,7 @@ public static class IdentifyQueue
             }).ToList(),
         };
         Jobs[job.Id] = job;
+        JobRegistry.Add(job);
         Prune();
 
         _ = Task.Run(async () =>
