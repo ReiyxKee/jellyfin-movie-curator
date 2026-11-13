@@ -35,6 +35,9 @@ public class PlanOptions
     /// </summary>
     [JsonPropertyName("flatten")] public bool Flatten { get; set; } = true;
 
+    /// <summary>"Move up" button: only take nested items out of their parent folder (no renames, NFOs, extras, trash).</summary>
+    [JsonPropertyName("moveUp")] public bool MoveUp { get; set; }
+
     public bool IsSeries => string.Equals(Type, "series", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -60,6 +63,9 @@ public class ItemPlan
     [JsonPropertyName("kind")] public string Kind { get; set; } = "movie"; // movie | series
 
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Names of the Jellyfin collections (box sets) this item is in.</summary>
+    [JsonPropertyName("collections")] public List<string> Collections { get; set; } = new();
 
     /// <summary>Movie: video file. Series: series folder.</summary>
     [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
@@ -431,6 +437,26 @@ public class CuratorService
     /// A container folder holds no videos itself, only 2+ subfolders with videos whose names look like separate
     /// shows (not "Season 1", "S2", "Specials", "OVA"…). Returns those subfolders, or null.
     /// </summary>
+    /// <summary>Folder names Jellyfin itself reads as extras (key: name, value: kept as is).</summary>
+    private static readonly Dictionary<string, bool> JellyfinExtras = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["extras"] = true, ["trailers"] = true, ["other"] = true, ["behind the scenes"] = true, ["deleted scenes"] = true,
+        ["featurettes"] = true, ["interviews"] = true, ["scenes"] = true, ["shorts"] = true, ["clips"] = true, ["samples"] = true,
+    };
+
+    /// <summary>Which Jellyfin extras folder a bonus folder belongs in: promos -> trailers/, creditless OP/ED -> other/, rest -> extras/.</summary>
+    private static string ExtrasFolderFor(string name)
+    {
+        if (JellyfinExtras.ContainsKey(name))
+        {
+            return name;
+        }
+
+        return Regex.IsMatch(name, @"^(cms?|pvs?|trailers?|teasers?|promos?)$", RegexOptions.IgnoreCase) ? "trailers"
+            : Regex.IsMatch(name, @"^(nc|nced|ncop|creditless)$", RegexOptions.IgnoreCase) ? "other"
+            : "extras";
+    }
+
     /// <summary>Subfolder names that hold a movie, not a season ("The Movie", "劇場版", "Gekijouban").</summary>
     private static readonly Regex MovieLike = new(@"\b(the movie|movie|film|gekijou?ban)\b|劇場版|剧场版", RegexOptions.IgnoreCase);
 
@@ -441,7 +467,7 @@ public class CuratorService
 
     /// <summary>Subfolders that belong to a show but are never a show of their own.</summary>
     private static readonly Regex ExtrasLike = new(
-        @"^(extras?|bonus|sps?|cms?|pvs?|menus?|nced|ncop|nc|creditless|bd extras|bluray extras|featurettes|trailers|other|subs?|subtitles|scans|cds?)$",
+        @"^(extras?|bonus|sps?|cms?|pvs?|menus?|nced|ncop|nc|creditless|bd extras|bluray extras|featurettes|trailers?|teasers?|promos?|others?|misc|subs?|subtitles|scans|cds?)$",
         RegexOptions.IgnoreCase);
 
     /// <summary>
@@ -870,7 +896,76 @@ public class CuratorService
         }
     }
 
-    public List<ItemPlan> BuildPlan(PlanOptions opt) => opt.IsSeries ? BuildSeriesPlan(opt) : BuildMoviePlan(opt);
+    public List<ItemPlan> BuildPlan(PlanOptions opt)
+    {
+        var plans = BuildPlanCore(opt);
+        AttachCollections(plans);
+        return plans;
+    }
+
+    /// <summary>Tags each plan with the collections its item (or any of its grouped folders) is in.</summary>
+    private void AttachCollections(List<ItemPlan> plans)
+    {
+        var map = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var boxes = _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true }).OfType<BoxSet>();
+            foreach (var box in boxes)
+            {
+                foreach (var child in box.GetLinkedChildren())
+                {
+                    var key = child.Id.ToString("N");
+                    if (!map.TryGetValue(key, out var names))
+                    {
+                        map[key] = names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    names.Add(box.Name ?? string.Empty);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Curator: could not read collections");
+            return;
+        }
+
+        foreach (var p in plans)
+        {
+            var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var id in p.Members.Select(m => m.ItemId).Append(p.ItemId))
+            {
+                if (map.TryGetValue(id, out var n))
+                {
+                    names.UnionWith(n);
+                }
+            }
+
+            p.Collections = names.Where(x => x.Length > 0).ToList();
+        }
+    }
+
+    private List<ItemPlan> BuildPlanCore(PlanOptions opt)
+    {
+        if (!opt.MoveUp)
+        {
+            return opt.IsSeries ? BuildSeriesPlan(opt) : BuildMoviePlan(opt);
+        }
+
+        // move up only: plan without renames / NFOs, keep just the items that leave a parent folder, and
+        // drop their other changes (extras, Movies library, trash) - those stay for Adjust folders
+        var plain = new PlanOptions { Type = opt.Type, Rename = false, Episodes = false, Nfo = false, LockNfo = opt.LockNfo, Flatten = true };
+        var plans = opt.IsSeries ? BuildSeriesPlan(plain) : BuildMoviePlan(plain);
+        var other = new HashSet<string>(StringComparer.Ordinal) { "extras", "merged into extras", "to Movies library", "to curator trash", "empty show" };
+        foreach (var p in plans)
+        {
+            p.Ops = p.Ops.Any(o => o.Note == "flatten")
+                ? p.Ops.Where(o => o.Kind is not ("nfo" or "display") && (o.Note == null || !other.Contains(o.Note))).ToList()
+                : new List<PlanOp>();
+        }
+
+        return plans;
+    }
 
     // ------------------------------------------------------------------ movies
     private List<Movie> Movies() =>
@@ -1374,15 +1469,23 @@ public class CuratorService
             var subSeasons = new Dictionary<string, (int? Season, string Source)>(StringComparer.Ordinal);
             var excludedDirs = new List<string>();
             var subs = Directory.GetDirectories(mDir).Where(d => !IsJunk(d) && HasVideosBelow(d)).OrderBy(d => d, StringComparer.Ordinal).ToList();
+            // one folder per episode ("Arcane Season 1/S01 E01/"): 2+ subfolders holding a single (non-bonus, non-movie) video each
+            var episodeFolderCount = subs.Count(d =>
+            {
+                var n = System.IO.Path.GetFileName(d).Trim();
+                return VideoCount(d) == 1 && !ExtrasLike.IsMatch(n) && !JellyfinExtras.ContainsKey(n) && !MovieLike.IsMatch(n);
+            });
             foreach (var sub in subs)
             {
                 var inSub = rawEps.Where(e => IsUnder(e.Path, sub)).ToList();
                 var fs = FolderSeason(sub, inSub);
                 var rule = FolderRuleFor(sub);
                 var subName = System.IO.Path.GetFileName(sub).Trim();
-                var action = rule?.Action is "show" or "movies" ? rule.Action
+                var action = rule?.Action is "show" or "movies" or "extras" or "episode" ? rule.Action
                     : rule != null ? "season"
+                    : ExtrasLike.IsMatch(subName) || JellyfinExtras.ContainsKey(subName) ? "extras"
                     : VideoCount(sub) == 1 && MovieLike.IsMatch(subName) ? "movies"
+                    : VideoCount(sub) == 1 && episodeFolderCount >= 2 ? "episode"
                     : Flat && !ExtrasLike.IsMatch(subName) && VideoCount(sub) >= 2 ? "show"
                     : "season";
                 subSeasons[sub] = fs;
@@ -1400,6 +1503,59 @@ public class CuratorService
                     var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mDir)!, FlattenName(System.IO.Path.GetFileName(mDir), System.IO.Path.GetFileName(sub)));
                     Move(p, ctx, sub, target, "dirmove", "flatten");
                 }
+                else if (action == "episode")
+                {
+                    // the video, its subtitles and thumbnails move up into the show folder; the episode folder goes
+                    excludedDirs.Add(sub); // renamed on the next Adjust folders, once Jellyfin has rescanned them
+                    foreach (var f in Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories).Where(f => !IsJunk(f)).OrderBy(x => x, StringComparer.Ordinal))
+                    {
+                        var dst = System.IO.Path.Combine(mDir, System.IO.Path.GetFileName(f));
+                        if (File.Exists(dst) || ctx.Taken.Contains(dst))
+                        {
+                            p.Warnings.Add($"Not moved up, a file with that name is already there: {System.IO.Path.GetRelativePath(mDir, f)}");
+                            continue;
+                        }
+
+                        Move(p, ctx, f, dst, "move", "flatten");
+                    }
+
+                    foreach (var d in Directory.GetDirectories(sub, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                    {
+                        p.Ops.Add(new PlanOp { Kind = "rmdir", To = d, Note = "if empty after flatten" });
+                    }
+
+                    p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "if empty after flatten" });
+                }
+                else if (action == "extras")
+                {
+                    // bonus content (NCOP/NCED, CMs, PVs, menus, trailers): not episodes. Jellyfin shows a show's extras only
+                    // from its own folder names (extras/, trailers/, other/ ...), so other names are moved into one of those.
+                    excludedDirs.Add(sub);
+                    var target = System.IO.Path.Combine(mDir, ExtrasFolderFor(subName));
+                    if (target != sub)
+                    {
+                        if (!Directory.Exists(target) && !ctx.Taken.Contains(target))
+                        {
+                            Move(p, ctx, sub, target, "dirmove", "extras");
+                        }
+                        else
+                        {
+                            foreach (var f in Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal))
+                            {
+                                var dst = System.IO.Path.Combine(target, System.IO.Path.GetRelativePath(sub, f));
+                                MkDirs(p, ctx, System.IO.Path.GetDirectoryName(dst)!);
+                                Move(p, ctx, f, dst, "move", "extras");
+                            }
+
+                            foreach (var d in Directory.GetDirectories(sub, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                            {
+                                p.Ops.Add(new PlanOp { Kind = "rmdir", To = d, Note = "merged into extras" });
+                            }
+
+                            p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "merged into extras" });
+                        }
+                    }
+                }
                 else if (action == "movies" && moviesRoot != null)
                 {
                     // a movie kept in its own subfolder ("5. Shakugan no Shana: The Movie/"): the whole folder goes to Movies
@@ -1413,7 +1569,7 @@ public class CuratorService
                 }
             }
 
-            if (p.SeasonFolders.Count < 2 && members.Count == 1 && !p.SeasonFolders.Any(f => f.Action == "movies"))
+            if (p.SeasonFolders.Count < 2 && members.Count == 1 && !p.SeasonFolders.Any(f => f.Action != "season"))
             {
                 p.SeasonFolders.Clear(); // a single subfolder isn't worth a panel
             }
