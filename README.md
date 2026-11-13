@@ -27,9 +27,14 @@ Library locations come from Jellyfin itself, so it works with whatever paths you
 
 ### From the plugin repository (recommended)
 
-1. Jellyfin → **Dashboard → Plugins → Repositories → +**
-   - Name: `Movie Curator`
-   - URL: `https://raw.githubusercontent.com/ReiyxKee/jellyfin-movie-curator/main/manifest.json`
+1. Jellyfin → **Dashboard → Plugins → Repositories → +**, and pick a channel:
+
+   | Channel | Name | URL |
+   | --- | --- | --- |
+   | **Stable** | `Movie Curator` | `https://raw.githubusercontent.com/ReiyxKee/jellyfin-movie-curator/main/manifest.json` |
+   | **Experimental** (stable + test builds) | `Movie Curator (experimental)` | `https://raw.githubusercontent.com/ReiyxKee/jellyfin-movie-curator/main/manifest-experimental.json` |
+
+   Add only one of them. Switching from experimental back to stable takes effect with the next stable release.
 2. **Catalog → Movie Curator → Install**, then restart Jellyfin.
 3. Updates show up in Jellyfin when a new version is released (or install automatically with auto-update on).
 
@@ -142,9 +147,14 @@ please don't sell it. Any copy or modified version you share must stay open sour
 ## Releasing (maintainers)
 
 ```bash
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.2.0 && git push origin v1.2.0              # stable       -> 1.2.0.0, both manifests
+git tag v1.2.0-exp.1 && git push origin v1.2.0-exp.1  # experimental -> 1.2.0.1, experimental manifest only
 ```
 
-GitHub Actions builds the plugin, publishes a GitHub Release with the zip and adds the version to `manifest.json`
+Number experimental builds after the stable release they build on (`v<last stable>-exp.N`), so the next stable
+release (`1.3.0` = 1.3.0.0) is higher than all of them and experimental users move onto it.
+
+GitHub Actions builds the plugin, publishes a GitHub Release (a pre-release for experimental) with the zip and updates
+the channel manifest(s)
 (`.github/workflows/release.yml`). Every push to `main` is also compile-checked (`build.yml`). Versions must increase.
 
