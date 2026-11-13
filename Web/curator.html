@@ -528,6 +528,7 @@
     if (p.mergedFolders && p.mergedFolders.length) tags.push('<span class="mc-tag info">' + (p.mergedFolders.length + 1) + ' folders</span>');
     if (p.titleSource === 'custom') tags.push('<span class="mc-tag info">custom name</span>');
     if (p.detached) tags.push('<span class="mc-tag">detached</span>');
+    if (p.empty) tags.push('<span class="mc-tag warn">🗑 empty</span>');
     if (p.kind === 'series' && (p.seasons || []).length > 1) tags.push('<span class="mc-tag">📚 ' + p.seasons.length + ' seasons</span>');
     var orig = p.originalTitle && p.originalTitle !== p.jellyfinName ? esc(p.originalTitle) + ' · ' : '';
     var detailsUrl = '#/details?id=' + p.itemId + '&serverId=' + ApiClient.serverId();
@@ -585,6 +586,7 @@
       { group: 'Match', key: 'noids', label: 'No IDs at all', test: function (p) { return !Object.keys(ids(p)).length; } },
       { group: 'Match', key: 'conflict', label: 'Season numbering conflict', test: function (p) { return p.seasonConflict; } },
       NESTED,
+      { group: 'Folders', key: 'empty', label: '🗑 Empty shows (0 episode files)', test: function (p) { return p.empty; } },
       { group: 'Folders', key: 'grouped', label: '🔗 Several folders (grouped)', test: function (p) { return (p.members || []).length > 1; } },
       { group: 'Folders', key: 'detached', label: 'Detached', test: function (p) { return p.detached; } },
       { group: 'Folders', key: 'unnumbered', label: 'Episodes without numbers', test: function (p) { return p.episodesSkipped > 0; } },
@@ -639,7 +641,9 @@
   function visible() {
     var f = $('#mcFilter').value.toLowerCase();
     var tests = FILTERS[type].filter(function (d) { return activeFilters[type].indexOf(d.key) >= 0; });
+    var showEmpty = activeFilters[type].indexOf('empty') >= 0;
     return plans.filter(function (p) {
+      if (p.empty && !showEmpty) return false; // leftover folders with no episodes: only via the 🗑 filter
       for (var i = 0; i < tests.length; i++) if (!tests[i].test(p)) return false;
       if (f && (p.jellyfinName + ' ' + (p.originalTitle || '') + ' ' + p.title + ' ' + p.path).toLowerCase().indexOf(f) < 0) return false;
       return true;

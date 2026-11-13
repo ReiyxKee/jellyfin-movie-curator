@@ -135,6 +135,9 @@ public class ItemPlan
     /// <summary>Series: you detached this folder from its automatic group.</summary>
     [JsonPropertyName("detached")] public bool Detached { get; set; }
 
+    /// <summary>Series: no episode files at all (a leftover folder); its plan clears it out.</summary>
+    [JsonPropertyName("empty")] public bool Empty { get; set; }
+
     /// <summary>Series: this folder only holds other shows (e.g. "Fate Series/Fate Zero/…"); their folder names.</summary>
     [JsonPropertyName("containerShows")] public List<string> ContainerShows { get; set; } = new();
 
@@ -330,6 +333,9 @@ public class CuratorService
 
     private static string LogDir => System.IO.Path.Combine(Plugin.Instance!.DataFolderPath, "logs");
 
+    /// <summary>Leftover files of removed empty folders go here (never deleted; undo moves them back).</summary>
+    private static string TrashDir => System.IO.Path.Combine(Plugin.Instance!.DataFolderPath, "trash");
+
     // ------------------------------------------------------------------ name helpers
     private static string CleanSpaces(string s)
     {
@@ -432,7 +438,7 @@ public class CuratorService
 
     /// <summary>Subfolders that belong to a show but are never a show of their own.</summary>
     private static readonly Regex ExtrasLike = new(
-        @"^(extras?|bonus|nced|ncop|nc|menu|bd extras|bluray extras|featurettes|trailers|other|subs?|subtitles|scans|cds?)$",
+        @"^(extras?|bonus|sps?|cms?|pvs?|menus?|nced|ncop|nc|creditless|bd extras|bluray extras|featurettes|trailers|other|subs?|subtitles|scans|cds?)$",
         RegexOptions.IgnoreCase);
 
     /// <summary>
@@ -828,6 +834,20 @@ public class CuratorService
         ctx.Taken.Add(dst);
         p.Ops.Add(new PlanOp { Kind = kind, From = src, To = dst, Note = note });
         return true;
+    }
+
+    private static void MkDirs(ItemPlan p, Ctx ctx, string dir)
+    {
+        var missing = new Stack<string>();
+        for (var d = dir; !string.IsNullOrEmpty(d) && !Directory.Exists(d) && !ctx.Taken.Contains(d); d = System.IO.Path.GetDirectoryName(d))
+        {
+            missing.Push(d);
+        }
+
+        while (missing.Count > 0)
+        {
+            MkDir(p, ctx, missing.Pop());
+        }
     }
 
     private static void MkDir(ItemPlan p, Ctx ctx, string dir)
@@ -1278,6 +1298,29 @@ public class CuratorService
 
         var final = opt.Rename ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(dir)!, names.Folder) : dir;
         p.FinalPath = final;
+
+        // empty show (no episode files, no videos at all): clear the leftover folder out. Its files (artwork, NFO)
+        // go to the curator's trash folder - logged like every change, so Undo / Rewind brings them back.
+        if (members.Count == 1 && allEpisodes.Count == 0 && VideoCount(dir) == 0)
+        {
+            p.Empty = true;
+            var trash = System.IO.Path.Combine(TrashDir, $"{Safe(System.IO.Path.GetFileName(dir))}-{s.Id:N}");
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal))
+            {
+                var dst = System.IO.Path.Combine(trash, System.IO.Path.GetRelativePath(dir, f));
+                MkDirs(p, ctx, System.IO.Path.GetDirectoryName(dst)!);
+                Move(p, ctx, f, dst, "move", "to curator trash");
+            }
+
+            foreach (var sub in Directory.GetDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+            {
+                p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "empty show" });
+            }
+
+            p.Ops.Add(new PlanOp { Kind = "rmdir", To = dir, Note = "empty show" });
+            p.Warnings.Add("No episode files in this folder: it gets removed (leftover artwork / NFO go to the curator's trash; Undo brings them back).");
+            return p;
+        }
 
         // 0. container folder ("Fate Series/" holding Fate Zero, UBW…): move each show up to the library root.
         //    After the rescan each is identified on its own; shows that turn out to be the same are then merged
