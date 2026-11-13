@@ -1994,13 +1994,13 @@ public class CuratorService
 
     private static void PlanEpisodes(ItemPlan p, Ctx ctx, Series s, string dir, List<SeasonSource> sources, string seriesFolder, bool renameFiles)
     {
-        var seasonTpl = Flat ? string.Empty : Config.SeasonFolderTemplate ?? DefaultSeasonFolder; // empty = episodes directly in the show folder
-        if (string.IsNullOrWhiteSpace(seasonTpl) && sources.Count > 1)
-        {
-            seasonTpl = "Season {season}"; // merged folders always need a season folder each
-        }
-        var episodeTpl = Flat ? Or(Config.FlatEpisodeTemplate, "{title} - {episode:00}") : Or(Config.EpisodeTemplate, DefaultEpisodeFile);
         var all = sources.SelectMany(x => x.Episodes.Select(e => (x.Dir, e.Episode, e.Season))).ToList();
+        // a show whose episodes sit in subfolders (seasons grouped into one folder) keeps season folders even in the
+        // "each season its own show" layout - otherwise every season would be poured into the show folder
+        var seasonFolders = !Flat || sources.Count > 1
+            || all.Any(x => System.IO.Path.GetDirectoryName(x.Episode.Path) != x.Dir && IsUnder(x.Episode.Path, x.Dir));
+        var seasonTpl = !seasonFolders ? string.Empty : Or(Config.SeasonFolderTemplate, DefaultSeasonFolder); // empty = episodes directly in the show folder
+        var episodeTpl = !seasonFolders ? Or(Config.FlatEpisodeTemplate, "{title} - {episode:00}") : Or(Config.EpisodeTemplate, DefaultEpisodeFile);
         var numbered = all.Where(x => EpNumber(ctx, x.Episode).HasValue && IsUnder(x.Episode.Path, x.Dir)).ToList();
         p.EpisodesSkipped = all.Count - numbered.Count;
         if (p.EpisodesSkipped > 0)
@@ -2042,7 +2042,14 @@ public class CuratorService
                 + (end is int en ? "-E" + en.ToString(pad, CultureInfo.InvariantCulture) : string.Empty);
             tokens["episodeTitle"] = e.Name ?? string.Empty;
             // a merged folder's Jellyfin season title is just its folder name, so only use it inside the main folder
-            tokens["seasonTitle"] = srcDir == dir ? SeasonTitle(e) : string.Empty;
+            var seasonTitle = srcDir == dir ? SeasonTitle(e) : string.Empty;
+            // Jellyfin names a season after its folder when it can't read one ("Himouto! Umaru-chan - Season 2"): not a title
+            if (seasonTitle == System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(e.Path)))
+            {
+                seasonTitle = string.Empty;
+            }
+
+            tokens["seasonTitle"] = seasonTitle;
             var stem = System.IO.Path.GetFileNameWithoutExtension(e.Path);
 
             var seasonName = string.IsNullOrWhiteSpace(seasonTpl) ? string.Empty : Safe(Render(seasonTpl, tokens));
