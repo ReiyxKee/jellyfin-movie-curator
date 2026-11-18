@@ -169,7 +169,7 @@ public static class SearchQueue
     // minimum gap between requests to the same source (rate-limited sources ban clients that go faster)
     private static readonly Dictionary<string, int> Gaps = new(StringComparer.Ordinal)
     {
-        ["AniDB"] = 2500, ["AniSearch"] = 1200, ["AniList"] = 800, ["The Open Movie Database"] = 500, ["TheMovieDb"] = 300,
+        ["AniDB"] = 2500, ["AniSearch"] = 1200, ["AniList"] = 800, ["MyAnimeList"] = 1100, ["The Open Movie Database"] = 500, ["TheMovieDb"] = 300,
     };
 
     private static readonly ConcurrentDictionary<string, DateTime> LastCall = new();

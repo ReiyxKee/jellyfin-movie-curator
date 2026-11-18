@@ -492,7 +492,7 @@ public static class IdentifyQueue
 
         // another source took over (its title isn't the pick's): its ids go, and its artwork is replaced below
         // ... or an anime source added itself to a pick from elsewhere (its own match by name: AniList "Arcane" -> "1999!")
-        var anime = new[] { "AniList", "AniDB", "AniSearch", "Kitsu" };
+        var anime = new[] { "AniList", "AniDB", "AniSearch", "MyAnimeList", "Kitsu" };
         var overridden = !string.Equals(item.Name?.Trim(), picked.Name.Trim(), StringComparison.OrdinalIgnoreCase)
             || (!anime.Any(picked.ProviderIds.ContainsKey) && anime.Any(item.ProviderIds.ContainsKey));
         if (overridden)

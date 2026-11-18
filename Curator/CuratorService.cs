@@ -393,9 +393,9 @@ public class CuratorService
         { ".nfo", ".jpg", ".jpeg", ".png", ".webp", ".tbn" };
 
     /// <summary>For movies, a match from these is usually wrong (anime plugins grabbing live-action films).</summary>
-    private static readonly string[] AnimeProviders = { "AniList", "AniDB", "AniSearch" };
+    private static readonly string[] AnimeProviders = { "AniList", "AniDB", "AniSearch", "MyAnimeList" };
 
-    private static readonly string[] SeriesIdProviders = { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB", "AniSearch" };
+    private static readonly string[] SeriesIdProviders = { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB", "AniSearch", "MyAnimeList" };
 
     private static readonly Regex IdTag = new(@"\[(imdbid|tmdbid|tvdbid|anidbid)-[^\]]+\]", RegexOptions.IgnoreCase);
 
@@ -643,7 +643,7 @@ public class CuratorService
     }
 
     private static readonly string[] KnownIdProviders =
-        { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB", "AniSearch", "Kitsu", "TvRage", "TmdbCollection", "Zap2It", "Tvcom" };
+        { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB", "AniSearch", "MyAnimeList", "Kitsu", "TvRage", "TmdbCollection", "Zap2It", "Tvcom" };
 
     /// <summary>
     /// One spelling per provider: Jellyfin reads an NFO's &lt;uniqueid type="anilist"&gt; back as "anilist", while the

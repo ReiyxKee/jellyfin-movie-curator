@@ -245,11 +245,7 @@
       <form class="mc-form" id="mcIdForm">
         <input class="mc-text" id="mcIdName" placeholder="Name">
         <input class="mc-text" id="mcIdYear" placeholder="Year" inputmode="numeric">
-        <div class="mc-ids">
-          <input class="mc-text" id="mcIdImdb" placeholder="IMDb ID (tt…)">
-          <input class="mc-text" id="mcIdTmdb" placeholder="TMDB ID">
-          <input class="mc-text" id="mcIdTvdb" placeholder="TVDB ID">
-        </div>
+        <div class="mc-ids" id="mcIdIds"></div>
         <div class="mc-wide mc-bar" style="margin:0">
           <span class="mc-source-picker" data-scope="identify"></span>
           <button is="emby-button" type="submit" class="raised button-submit mc-btn"><span>Search</span></button>
@@ -433,7 +429,7 @@
   var batch = [];         // [{ id, query, year, results, pick, checked, confident, status }]
   var available = {};     // type -> metadata source names Jellyfin offers for that library type
   // Sources that rate-limit (and ban) clients: minimum gap between requests in ms
-  var THROTTLE = { 'AniDB': 2500, 'AniSearch': 1200, 'AniList': 800, 'The Open Movie Database': 500, 'TheMovieDb': 300 };
+  var THROTTLE = { 'AniDB': 2500, 'AniSearch': 1200, 'AniList': 800, 'MyAnimeList': 1100, 'The Open Movie Database': 500, 'TheMovieDb': 300 };
   var DEFAULT_GAP = 300;
   var NOTES = { 'AniDB': 'strict rate limit, slow', 'The Open Movie Database': 'mostly by IMDb ID' };
 
@@ -1796,13 +1792,11 @@
   });
 
   // ---------------------------------------------------------------- search sources
-  function storageKey() { return 'movieCurator.sources.v2.' + type; }
-  /** Every source, except strictly rate-limited ones (1 s or more between requests: AniDB, AniSearch) - tick those by hand. */
+  function storageKey() { return 'movieCurator.sources.v3.' + type; } // v3: the default became "every source"
+  /** Strictly rate-limited sources (1 s or more between requests: AniDB, AniSearch, MyAnimeList): searched slowly. */
   function strictSource(n) { return (THROTTLE[n] || 0) >= 1000; }
-  function defaultSources(list) {
-    var d = list.filter(function (n) { return !strictSource(n); });
-    return d.length ? d : list.slice(0, 1);
-  }
+  /** Every source ticked by default (the rate-limited ones are still spaced out by THROTTLE). */
+  function defaultSources(list) { return list.slice(); }
   function chosenSources() {
     var list = available[type] || [];
     var saved = null;
@@ -1829,12 +1823,10 @@
 
   function pickerHtml(chosen) {
     var list = available[type] || [];
-    var normal = list.filter(function (n) { return !strictSource(n); });
-    var all = normal.length > 0 && normal.every(function (n) { return chosen.indexOf(n) >= 0; });
-    var extra = chosen.filter(strictSource);
-    var label = all ? 'All' + (extra.length ? ' + ' + extra.join(', ') : '') : chosen.join(', ') || 'none';
+    var all = list.length > 0 && list.every(function (n) { return chosen.indexOf(n) >= 0; });
+    var label = all ? 'All' : chosen.join(', ') || 'none';
     return '<details class="mc-sources"><summary>Sources: ' + esc(label) + ' ▾</summary><div class="mc-sources-list">' +
-      '<label><input type="checkbox" class="mc-source-all"' + (all ? ' checked' : '') + '> <b>All</b><span class="mc-note">every source except the rate-limited ones</span></label>' +
+      '<label><input type="checkbox" class="mc-source-all"' + (all ? ' checked' : '') + '> <b>All</b><span class="mc-note">every source (rate-limited ones are searched slowly)</span></label>' +
       list.map(function (n) {
         return '<label><input type="checkbox" class="mc-source" value="' + esc(n) + '"' + (chosen.indexOf(n) >= 0 ? ' checked' : '') + '> ' + esc(n) +
           (strictSource(n) ? '<span class="mc-note">rate-limited: slow, and too many searches get you banned</span>'
@@ -1855,13 +1847,13 @@
     var picker = e.target.closest('.mc-source-picker');
     var list = Array.prototype.slice.call(picker.querySelectorAll('.mc-source:checked')).map(function (x) { return x.value; });
     if (e.target.classList.contains('mc-source-all')) {
-      var normal = (available[type] || []).filter(function (n) { return !strictSource(n); });
-      var strict = list.filter(strictSource);
-      list = e.target.checked ? normal.concat(strict) : normal.slice(0, 1).concat(strict);
+      var every = available[type] || [];
+      list = e.target.checked ? every.slice() : every.slice(0, 1); // unticking All keeps the first one
     }
     if (!list.length) { e.target.checked = true; return; } // keep at least one
     if (picker.getAttribute('data-scope') === 'identify') identifySources = list; else saveSources(list);
     renderPickers();
+    if (picker.getAttribute('data-scope') === 'identify') renderIdFields();
   });
   // close an open source dropdown when clicking elsewhere
   page.addEventListener('click', function (e) {
@@ -1973,14 +1965,73 @@
     $('#mcIdImagesWrap').style.display = b || mode === 'title' ? 'none' : '';
     $('#mcIdName').value = b ? b.query : (p.guessName || p.jellyfinName);
     $('#mcIdYear').value = b ? (b.year || '') : (p.guessYear || '');
-    $('#mcIdImdb').value = '';
-    $('#mcIdTmdb').value = '';
-    $('#mcIdTvdb').value = '';
-    $('#mcIdTvdb').style.display = p.kind === 'series' ? '' : 'none';
+    $('#mcIdIds').innerHTML = '';
+    idTyped = {};
+    renderIdFields(baseIdFields(p.kind));
+    idFieldsFor(p).then(function (fields) { if (identifyItem === p) renderIdFields(fields); });
     $('#mcIdResults').innerHTML = '';
     $('#mcIdStatus').textContent = '';
     showModal('#mcIdentify');
-    loadSources().then(function () { renderPickers(); runIdentifySearch(); });
+    loadSources().then(function () {
+      if (!identifySources || !identifySources.length) identifySources = chosenSources(); // opened before the list loaded
+      renderPickers();
+      renderIdFields();
+      runIdentifySearch();
+    });
+  }
+
+  // ---------------------------------------------------------------- ID fields of the search form
+  // IMDb / TMDB / TVDB always (TMDB also finds a show by its TVDB id), then one field per ID type an installed
+  // plugin adds (AniList, AniDB, AniSearch, MyAnimeList...), as Jellyfin lists them for the item.
+  var idFieldCache = {};
+  var ID_SKIP = { Zap2It: 1, TvRage: 1 };
+  function baseIdFields(kind) {
+    var f = [{ key: 'Imdb', name: 'IMDb ID (tt…)' }, { key: 'Tmdb', name: 'TMDB ID' }];
+    if (kind === 'series') f.push({ key: 'Tvdb', name: 'TVDB ID' });
+    return f;
+  }
+
+  function idFieldsFor(p) {
+    var kind = p.kind === 'series' ? 'series' : 'movie';
+    if (idFieldCache[kind]) return Promise.resolve(idFieldCache[kind]);
+    if (!p.itemId) return Promise.resolve(baseIdFields(kind));
+    var want = kind === 'series' ? 'Series' : 'Movie';
+    return http('GET', 'Items/' + p.itemId + '/ExternalIdInfos').then(function (list) {
+      var fields = baseIdFields(kind);
+      (list || []).forEach(function (x) {
+        if (!x || !x.Key || ID_SKIP[x.Key] || (x.Type && x.Type !== want)) return;
+        if (fields.some(function (f) { return f.key.toLowerCase() === x.Key.toLowerCase(); })) return;
+        fields.push({ key: x.Key, name: (x.Name || x.Key) + ' ID' });
+      });
+      idFieldCache[kind] = fields;
+      return fields;
+    }).catch(function () { return baseIdFields(kind); });
+  }
+
+  var idFields = [];  // every ID field for the item open in the search window
+  var idTyped = {};   // what was typed per ID (kept while its source is unticked)
+
+  /** The sources that look an ID up: TMDB takes IMDb / TVDB ids too, OMDb takes IMDb; the rest their own (AniList...). */
+  function idShownFor(key, sources) {
+    var s = sources.map(function (n) { return n.toLowerCase(); });
+    var has = function (n) { return s.indexOf(n) >= 0; };
+    switch (key.toLowerCase()) {
+      case 'imdb': return has('themoviedb') || has('the open movie database');
+      case 'tmdb': return has('themoviedb');
+      case 'tvdb': return has('themoviedb') || has('thetvdb') || has('tvdb');
+      default: return has(key.toLowerCase());
+    }
+  }
+
+  /** (Re)draw the ID inputs of the ticked sources; fields = a new full list (else the current one). */
+  function renderIdFields(fields) {
+    var box = $('#mcIdIds');
+    box.querySelectorAll('input[data-key]').forEach(function (el) { idTyped[el.getAttribute('data-key')] = el.value; });
+    if (fields) idFields = fields;
+    var sources = identifySources || chosenSources();
+    box.innerHTML = idFields.filter(function (f) { return idShownFor(f.key, sources); }).map(function (f) {
+      return '<input class="mc-text" data-key="' + esc(f.key) + '" placeholder="' + esc(f.name) + '" value="' + esc(idTyped[f.key] || '') + '">';
+    }).join('');
   }
 
   var lastResults = [];
@@ -1989,9 +2040,10 @@
     var info = { Name: $('#mcIdName').value.trim(), ProviderIds: {} };
     var y = $('#mcIdYear').value.trim();
     if (/^\d{4}$/.test(y)) info.Year = parseInt(y, 10);
-    if ($('#mcIdImdb').value.trim()) info.ProviderIds.Imdb = $('#mcIdImdb').value.trim();
-    if ($('#mcIdTmdb').value.trim()) info.ProviderIds.Tmdb = $('#mcIdTmdb').value.trim();
-    if ($('#mcIdTvdb').value.trim()) info.ProviderIds.Tvdb = $('#mcIdTvdb').value.trim();
+    document.querySelectorAll('#mcIdIds input[data-key]').forEach(function (el) {
+      var v = el.value.trim();
+      if (v) info.ProviderIds[el.getAttribute('data-key')] = v;
+    });
     var providers = identifySources || chosenSources();
     $('#mcIdStatus').textContent = 'Searching ' + providers.join(', ') + '…';
     $('#mcIdResults').innerHTML = '';
@@ -2219,13 +2271,16 @@
     }).catch(function (e) { $('#mcBatchStatus').textContent = 'That job is no longer available: ' + e.message; });
   }
 
-  /** Build SearchInfo from a typed query: a title, or an ID like tt1234567 / tmdb:123 / tvdb:123. */
+  /** Build SearchInfo from a typed query: a title, or an ID like tt1234567 / tmdb:123 / tvdb:123 / mal:123 / anilist:123 / anidb:123 / anisearch:123. */
   function queryInfo(q, y) {
     var info = { Name: '', ProviderIds: {} }, m;
     q = (q || '').trim();
     if (/^tt\d+$/i.test(q)) info.ProviderIds.Imdb = q;
     else if ((m = /^tmdb:(\d+)$/i.exec(q))) info.ProviderIds.Tmdb = m[1];
     else if ((m = /^tvdb:(\d+)$/i.exec(q))) info.ProviderIds.Tvdb = m[1];
+    else if ((m = /^(mal|myanimelist|anilist|anidb|anisearch):(\d+)$/i.exec(q))) {
+      info.ProviderIds[{ mal: 'MyAnimeList', myanimelist: 'MyAnimeList', anilist: 'AniList', anidb: 'AniDB', anisearch: 'AniSearch' }[m[1].toLowerCase()]] = m[2];
+    }
     else info.Name = q;
     if (/^\d{4}$/.test(String(y || '').trim())) info.Year = parseInt(y, 10);
     return info;
