@@ -1,6 +1,7 @@
 <div id="MovieCuratorPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
 <style>
   #MovieCuratorPage { --mc-bg: #101010; --mc-line: rgba(128,128,128,.28); --mc-soft: rgba(128,128,128,.12); --mc-warn: #e0a030; --mc-ok: rgba(82,181,75,.3); --mc-info: rgba(0,164,220,.3); }
+  #MovieCuratorPage .mc-panel.mc-pinned { position: fixed; z-index: 30; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
   #MovieCuratorPage .mc-panel { position: sticky; top: 0; z-index: 20; background: var(--mc-bg); padding: .6em 0 .5em; border-bottom: 1px solid var(--mc-line); }
   #MovieCuratorPage .mc-bar { display: flex; flex-wrap: wrap; gap: .45em .9em; align-items: center; margin: .3em 0; }
   #MovieCuratorPage .mc-bar label { display: inline-flex; gap: .3em; align-items: center; cursor: pointer; font-size: .9em; }
@@ -11,6 +12,21 @@
   #MovieCuratorPage .mc-text { box-sizing: border-box; max-width: 100%; padding: .4em .6em; background: var(--mc-soft); color: inherit; border: 1px solid var(--mc-line); border-radius: 4px; font: inherit; }
   #MovieCuratorPage .mc-summary { font-size: .85em; opacity: .8; }
   #MovieCuratorPage .mc-coll-head { margin: 1em 0 .3em; padding: .35em .6em; border-left: 3px solid currentColor; background: var(--mc-soft); font-weight: bold; }
+  #MovieCuratorPage .mc-sb-row { display: flex; flex-wrap: wrap; gap: .4em .8em; align-items: center; padding: .5em 0; border-top: 1px solid var(--mc-line); }
+  #MovieCuratorPage .mc-sb-row b { flex: 1 1 18em; overflow-wrap: anywhere; }
+  #MovieCuratorPage .mc-sb-row input.mc-text { width: 16em; max-width: 100%; }
+  #MovieCuratorPage .mc-sb-row select.mc-text { max-width: 22em; }
+  #MovieCuratorPage .mc-cframe { margin: .8em 0; border: 1px solid #00a4dc66; border-radius: 8px; padding: 0 .6em .3em; }
+  #MovieCuratorPage .mc-cframe > .mc-coll-head { display: flex; flex-wrap: wrap; gap: .4em .8em; align-items: center; }
+  #MovieCuratorPage .mc-cframe-fold { cursor: pointer; text-decoration: none; color: inherit; }
+  #MovieCuratorPage .mc-cframe.mc-folded { padding-bottom: 0; }
+  #MovieCuratorPage .mc-cframe.mc-folded > .mc-coll-head { border-radius: 8px; margin-bottom: 0; }
+    #MovieCuratorPage .mc-coll-poster { height: 60px; width: 40px; object-fit: cover; border-radius: 3px; }
+  #MovieCuratorPage .mc-coll-img { font-weight: normal; max-width: 16em; padding: .15em .3em; }
+  #MovieCuratorPage .mc-cframe-acts { margin-left: auto; display: inline-flex; gap: .4em; align-items: center; font-weight: normal; }
+  #MovieCuratorPage .mc-cframe-acts .mc-btn { font-size: .85em; padding: .2em .7em; }
+  #MovieCuratorPage .mc-cframe > .mc-coll-head { margin: 0 -.6em .3em; border-left: 0; border-radius: 8px 8px 0 0; }
+  #MovieCuratorPage .mc-in-group { margin-left: 1.2em; border-left: 2px solid var(--mc-line); padding-left: .6em; }
   #MovieCuratorPage .mc-coll-head .mc-meta { font-weight: normal; margin-left: .5em; }
   #MovieCuratorPage .mc-version { font-size: .55em; font-weight: normal; opacity: .6; margin-left: .5em; }
   #MovieCuratorPage .mc-tag { display: inline-block; font-size: .72em; font-weight: normal; padding: .1em .55em; border-radius: 999px; background: var(--mc-soft); vertical-align: middle; margin-left: .3em; }
@@ -79,6 +95,7 @@
   #MovieCuratorPage .mc-node { display: flex; flex-wrap: wrap; gap: .3em .8em; align-items: center; justify-content: space-between;
     padding: .3em .5em .3em calc(.5em + (var(--d) - 1) * 1.3em); border-top: 1px solid var(--mc-line); font-size: .85em; }
   #MovieCuratorPage .mc-tree > .mc-node:first-child { border-top: 0; }
+  #MovieCuratorPage .mc-tree-path { font-family: monospace; font-size: .8em; opacity: .8; user-select: text; overflow-wrap: anywhere; justify-content: flex-start; }
   #MovieCuratorPage .mc-node-name { min-width: 0; overflow-wrap: anywhere; flex: 1 1 16em; }
   #MovieCuratorPage .mc-node-open { cursor: pointer; display: inline-block; width: 1em; text-decoration: none; }
   #MovieCuratorPage .mc-node-acts { display: flex; flex-wrap: wrap; gap: .25em; align-items: center; }
@@ -95,6 +112,13 @@
   #MovieCuratorPage .mc-coll-x:hover { opacity: 1; }
   #MovieCuratorPage .mc-title-link:hover { text-decoration: underline; }
   #MovieCuratorPage .mc-node-play { font-size: .95em; padding: .1em .55em; line-height: 1.2; }
+  #MovieCuratorPage .mc-linebar { display: inline-flex; flex-wrap: wrap; gap: .3em; align-items: center; font-size: .85em;
+    padding: .15em .45em; border: 1px solid #00a4dc; border-radius: 6px; }
+  #MovieCuratorPage .mc-linebar[hidden] { display: none; }
+  #MovieCuratorPage .mc-node-sel { margin: 0 .35em 0 0; vertical-align: middle; }
+  #MovieCuratorPage .mc-node.mc-node-picked { background: rgba(0,164,220,.12); }
+  #MovieCuratorPage .mc-node-btn[disabled] { opacity: .4; cursor: default; }
+  #MovieCuratorPage .mc-node-act, #MovieCuratorPage .mc-node-into, #MovieCuratorPage .mc-line-set, #MovieCuratorPage .mc-line-into { max-width: 15em; padding: .15em .3em; }
   #MovieCuratorPage .mc-node-btn.on { border-color: #00a4dc; background: rgba(0,164,220,.28); }
   #MovieCuratorPage .mc-node-season, #MovieCuratorPage .mc-node-ep { width: 4.4em; padding: .15em .3em; }
   #MovieCuratorPage .mc-node-title { width: 14em; max-width: 100%; padding: .15em .3em; }
@@ -155,6 +179,7 @@
   <h2 class="sectionTitle">Movie Curator<span class="mc-version" id="mcVersion"></span></h2>
 
   <!-- ============================================================ sticky control panel -->
+  <div id="mcPanelSpacer" hidden></div>
   <div class="mc-panel" id="mcPanel">
     <!-- row 1: always available (not tied to the selection) -->
     <div class="mc-bar mc-row1">
@@ -171,11 +196,17 @@
     <!-- row 2: acts on the selected rows; each button only shows when it applies to something selected -->
     <div class="mc-bar mc-row2">
       <span class="mc-selinfo" id="mcSelInfo">Select rows below to act on them</span>
+      <span class="mc-linebar" id="mcLineBar" hidden>
+        <b id="mcLineCount"></b>
+        <span id="mcLineSetWrap"></span>
+        <button type="button" class="mc-node-btn" id="mcLineRun" title="Run the actions of the selected lines now (logged: undo in 🕘 History)">▶ Apply actions</button>
+        <a class="mc-link" id="mcLineReset" title="Forget your choices for the selected lines">reset</a>
+        <a class="mc-link" id="mcLineClear">clear</a>
+      </span>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcBatchIdentify" title="Suggest a match for each selected item; review and apply"><span>🔍 Identify</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcMoveUp" title="Only move the selected nested movies / shows / seasons up to the library root: no renames, no NFOs"><span>📤 Move up</span></button>
       <button is="emby-button" type="button" class="raised mc-btn button-submit" id="mcMoveFolders" title="Put the selected items' folders and videos where the tree says (new folders, up, Specials, Movies, group with): nothing is renamed"><span>📁 Move folders</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcRenameFiles" title="Rename the selected items' folders and files by the naming rules (plus NFOs / titles): nothing changes place"><span>✏ Rename files</span></button>
-      <button is="emby-button" type="button" class="raised mc-btn mc-series-only" id="mcGroupNew" title="Make a new folder and move the selected shows into it (on 📁 Move folders)"><span>📁 Group into new folder…</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcCombine" title="Treat the selected series folders as one show (merged as seasons)"><span>🔗 Combine selected</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcVerifySel" title="Confirm the current match of the selected items"><span>✓ Mark verified</span></button>
       <button is="emby-button" type="button" class="raised mc-btn" id="mcUnverifySel" title="Remove the ✓ verified mark from the selected items"><span>Unmark verified</span></button>
@@ -188,8 +219,9 @@
         <input type="checkbox" id="mcSelectAllBox" style="transform:scale(1.25)"> <span id="mcSelectAllLabel">Select all</span></label>
       <input type="search" class="mc-text" id="mcFilter" placeholder="Search name or path" style="min-width:min(14em, 100%)">
       <span id="mcFilterMenu"></span>
-      <label class="mc-all" title="List rows under their Jellyfin collection; the rest follow under 'Not in a collection'">
+      <label class="mc-all" title="Shows / movies not in a collection first, then one foldable frame per collection">
         <input type="checkbox" id="mcGroupColl"> 📚 Group by collection</label>
+      <span class="mc-meta" id="mcCollAll" hidden><a class="mc-link" data-fold="open">Expand all</a> · <a class="mc-link" data-fold="close">Collapse all</a></span>
       <span class="mc-summary mc-push" id="mcSummary">Loading…</span>
     </div>
   </div>
@@ -198,7 +230,8 @@
 
   <!-- ============================================================ background task dock (window closed, work continues) -->
   <div class="mc-dock" id="mcDock" hidden>
-    <div class="mc-dock-head">Movie Curator · background jobs <span class="mc-meta">(keep running if you leave this page)</span></div>
+    <div class="mc-dock-head">Movie Curator · background jobs <span class="mc-meta">(keep running if you leave this page)</span>
+      <a class="mc-link" id="mcDockAll" hidden style="float:right" title="Hide every finished job">✕ Dismiss all</a></div>
     <div id="mcDockList"></div>
   </div>
 
@@ -233,6 +266,47 @@
   </div>
 
   <!-- ============================================================ batch identify modal -->
+  <div class="mc-modal" id="mcCollBatch" hidden>
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
+      <h3><span>Group into collections</span>
+        <span class="mc-bar" style="margin:0">
+          <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcCbApply"><span>Apply checked</span></button>
+          <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
+        </span></h3>
+      <p class="mc-meta" style="margin-top:0">A collection is suggested for each one: an existing collection its title starts with, else the title it shares with
+        the others you selected (movies: the same TMDB collection). Pick another from the list or type a new name, tick the rows, <b>Apply checked</b>.
+        Each collection is created when needed; no files change.</p>
+      <div class="mc-bar">
+        <label><input type="checkbox" id="mcCbAll" style="transform:scale(1.2)"> Select all</label>
+        <input class="mc-text" id="mcCbSetAll" placeholder="Set all to… (collection name)" style="width:16em">
+        <button is="emby-button" type="button" class="raised mc-btn" id="mcCbSetAllGo"><span>Set all</span></button>
+      </div>
+      </div>
+      <div class="mc-dialog-body"><div id="mcCbList"></div></div>
+    </div>
+  </div>
+
+  <div class="mc-modal" id="mcSeasonBatch" hidden>
+    <div class="mc-dialog mc-split">
+      <div class="mc-dialog-head">
+      <h3><span>Season names</span>
+        <span class="mc-bar" style="margin:0">
+          <button is="emby-button" type="button" class="raised button-submit mc-btn" id="mcSbApply"><span>Apply checked</span></button>
+          <button is="emby-button" type="button" class="raised mc-btn mc-close"><span>Close</span></button>
+        </span></h3>
+      <p class="mc-meta" style="margin-top:0">Each selected season folder is searched by its current title. Pick the right name per row (or "use what I typed"),
+        tick the rows to apply. This only sets each folder's season title: <b>✏ Rename</b> then names the folder and its episodes after it.</p>
+      <div class="mc-bar">
+        <label><input type="checkbox" id="mcSbAll" style="transform:scale(1.2)"> Select all</label>
+        <button is="emby-button" type="button" class="raised mc-btn" id="mcSbSearch"><span>Search all again</span></button>
+      </div>
+      <div class="mc-meta" id="mcSbStatus"></div>
+      </div>
+      <div class="mc-dialog-body"><div id="mcSbList"></div></div>
+    </div>
+  </div>
+
   <div class="mc-modal" id="mcBatch" hidden>
     <div class="mc-dialog mc-split">
       <div class="mc-dialog-head">
@@ -292,7 +366,6 @@
         <label><input type="checkbox" id="mcNfo" checked> Write NFO</label>
         <label><input type="checkbox" id="mcLockNfo" checked> Lock NFO</label>
         <label><input type="checkbox" id="mcLockAfter" checked> Lock after identifying / marking verified</label>
-        <label class="mc-series-only"><input type="checkbox" id="mcEpisodes"> Rename episodes into season folders</label>
         <label class="mc-movies-only" title="Movies inside collection folders like 'Rush Hour 1-3/' each get their own top-level folder">
           <input type="checkbox" id="mcFlatten" checked> Move movies out of collection folders</label>
         <label class="mc-series-only" title="Folders holding several shows or seasons (e.g. 'Fate Series/', or 'Sword Art Online/' with each season in a subfolder) are split: each one gets its own top-level folder">
@@ -385,8 +458,9 @@
   function api(method, path, body) { return http(method, 'MovieCurator/' + path, body); }
   function planById(id) { return plans.filter(function (p) { return p.itemId === id; })[0]; }
   /** A row, or a folder inside a series group (members can be re-identified on their own). */
+  var lineItems = {}; // itemId -> minimal item for a tree line identified on its own
   function itemById(id) {
-    var hit = planById(id);
+    var hit = planById(id) || lineItems[id];
     if (hit) return hit;
     plans.some(function (p) {
       return (p.members || []).some(function (m) { if (m.itemId === id) { hit = m; return true; } return false; });
@@ -404,7 +478,7 @@
   function poster(id, h) { return ApiClient.getUrl('Items/' + id + '/Images/Primary', { maxHeight: h || 240, quality: 85 }); }
   function opts() {
     return {
-      type: type, rename: $('#mcRename').checked, episodes: type === 'series' && $('#mcEpisodes').checked,
+      type: type, rename: $('#mcRename').checked, episodes: type === 'series', // ✏ Rename files always renames a show's episodes (and its season folders)
       flatten: type === 'series' ? $('#mcFlattenSeries').checked : $('#mcFlatten').checked,
       nfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
     };
@@ -430,7 +504,38 @@
   }
   function stickyOffset() {
     $('#mcPanel').style.top = headerHeight() + 'px';
+    pinPanel();
   }
+  /**
+   * Keep the control panel visible while scrolling. CSS sticky alone fails when Jellyfin scrolls an element that isn't
+   * the panel's container, so: once the panel's spot scrolls under Jellyfin's header, it's pinned (position: fixed) over
+   * the content area, and a spacer of its height keeps the list from jumping.
+   */
+  function pinPanel() {
+    var panel = $('#mcPanel'), spacer = $('#mcPanelSpacer');
+    if (!panel || !spacer) return;
+    var top = headerHeight();
+    var anchor = (panel.classList.contains('mc-pinned') ? spacer : panel).getBoundingClientRect().top;
+    var pin = anchor < top - 1;
+    if (pin && !panel.classList.contains('mc-pinned')) {
+      spacer.style.height = panel.offsetHeight + 'px';
+      spacer.hidden = false;
+      panel.classList.add('mc-pinned');
+    } else if (!pin && panel.classList.contains('mc-pinned')) {
+      panel.classList.remove('mc-pinned');
+      spacer.hidden = true;
+      panel.style.left = panel.style.width = '';
+    }
+    if (panel.classList.contains('mc-pinned')) {
+      var r = page.getBoundingClientRect();
+      panel.style.top = top + 'px';
+      panel.style.left = Math.round(r.left) + 'px';
+      panel.style.width = Math.round(r.width) + 'px';
+      spacer.style.height = panel.offsetHeight + 'px';
+    }
+  }
+  // any element's scroll (capture), so it works whichever container Jellyfin scrolls
+  document.addEventListener('scroll', function () { pinPanel(); }, true);
   /**
    * Pop-up windows and the floating progress bar belong to the content area (right of Jellyfin's sidebar, below
    * its header), not the whole screen; otherwise a docked sidebar overlaps them on wide screens.
@@ -576,9 +681,10 @@
   // ---------------------------------------------------------------- folder tree (every folder / file line has its own actions)
   var openDirs = {}; // path -> 'loading' | listing of its files
   var notesOpen = {}; // itemId -> notes list shown
+  var pickedLines = {}; // path -> { row, kind, depth, series } : folder / file lines ticked for a bulk action
   var NODE_TAG = {
     show: '⬆ becomes its own show', up: '⬆ moves up one level', episode: '📥 files merge into the show',
-    movies: '🎬 to Movies', into: '🔗 group with ', trash: '🗑 deleted (to trash)', stay: '', season: ''
+    movies: '🎬 to Movies', into: '🔗 into ', newshow: '📦 to new show ', trash: '🗑 deleted (to trash)', stay: '', season: ''
   };
   var EP_SRC = { custom: 'set by you', jellyfin: 'from Jellyfin', name: 'from the file name', none: '' };
   /** Top-level show folders, for "Group with". */
@@ -599,40 +705,59 @@
         return '<option value="' + esc(r) + '"' + (node.action === 'into' && node.target === r ? ' selected' : '') + '>' + esc(r.split('/').pop()) + '</option>';
       }).join('') + '</select>';
   }
-  function nodeButtons(node, kind, depth, p) {
-    var a = node.action === 'season' || node.action === 'leave' ? 'stay' : node.action;
-    var series = p.kind === 'series';
-    var btn = function (act, label, title) {
-      return '<button type="button" class="mc-node-btn' + (a === act ? ' on' : '') + '" data-act="' + act + '" title="' + esc(title) + '">' + label + '</button>';
-    };
-    var b = [];
-    if (series && kind === 'dir' && depth === 1) {
-      b.push(btn('show', '⬆ Own show', 'Move it up to the library root as its own show'));
-      b.push(btn('episode', '📥 Merge', 'Move its files up into this show\'s folder'));
-    } else if (depth >= 2 || (!series && kind === 'dir')) {
-      b.push(btn('up', '⬆ Up', 'Move it up one level'));
+  /** The actions that apply to a line, for its dropdown. */
+  function lineActions(kind, depth, series) {
+    var o = [['stay', '• Stay']];
+    if (series && kind === 'dir' && depth === 1) { o.push(['show', '⬆ Own show']); o.push(['episode', '📥 Merge into show']); }
+    if (series) o.push(['newshow', '📦 Move to new show…']);
+    else if (depth >= 2 || (!series && kind === 'dir')) o.push(['up', '⬆ Move up']);
+    o.push(['extras', specialsFolder ? '🎁 Specials' : '🎁 Jellyfin extra'], ['movies', '🎬 Movie'], ['trash', '🗑 Delete']);
+    return o;
+  }
+  var lineChoice = {}; // path -> '@rename' | '@identify' | '@seasonname': picked, run by ▶ Execute (not saved)
+  var pendingInto = {}; // path -> true: "Group with" picked, waiting for the show in the 2nd dropdown
+  /** One list of actions; "Group with" adds a second dropdown with the shows. */
+  function actionSelect(cur, target, list, groupNode, cls, intoCls) {
+    var items = list.concat(groupNode ? [['into', '🔗 Move into show…']] : []);
+    var html = '<select class="mc-text ' + cls + '" title="Pick an action, then ▶ Execute (moves also run with 📁 Move folders)">' +
+      items.map(function (o) { return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>';
+    if (groupNode && cur === 'into') {
+      html += ' <select class="mc-text ' + intoCls + '" title="The show to move it into"><option value="">Pick a show…</option>' +
+        groupTargets(groupNode).map(function (r) {
+          return '<option value="' + esc(r) + '"' + (target === r ? ' selected' : '') + '>' + esc(r.split('/').pop()) + '</option>';
+        }).join('') + '</select>';
     }
-    b.push(btn('extras', '🎁 Specials', specialsFolder ? 'Move it to the Specials folder (' + specialsFolder + ')' : 'Make it a Jellyfin extra of this ' + (series ? 'show' : 'movie')));
-    b.push(btn('movies', '🎬 Movie', 'Move it to the Movies library as its own movie'));
-    b.push(btn('stay', '• Stay', 'Keep it where it is'));
-    b.push(btn('trash', '🗑 Delete', 'Delete it: moves to _curator_trash next to the library on Move folders (undo brings it back)'));
-    if (series && kind === 'dir' && depth === 1 && a === 'stay') {
+    return html;
+  }
+  function nodeButtons(node, kind, depth, p) {
+    var saved = node.action === 'season' || node.action === 'leave' ? 'stay' : node.action;
+    var series = p.kind === 'series';
+    var list = [];
+    if (series) list.push(['@rename', '✏ Rename']);
+    if (series && kind === 'dir' && depth === 1) list.push(['@seasonname', '🔍 Identify season name']);
+    if (kind === 'file' && node.itemId && (node.itemType === 'Movie' || node.itemType === 'Series') && node.itemId !== p.itemId) list.push(['@identify', '🔍 Identify']);
+    list = list.concat(lineActions(kind, depth, series));
+    var cur = lineChoice[node.path] || (pendingInto[node.path] ? 'into' : saved);
+    var b = [actionSelect(cur, node.target, list, series ? node : null, 'mc-node-act', 'mc-node-into')];
+    if (series && kind === 'dir' && depth === 1 && cur === 'stay') {
       b.push('<input class="mc-text mc-node-season" type="number" min="0" max="99" placeholder="S#" title="Season number of this folder (its order)" value="' + (node.season != null ? node.season : '') + '">');
-      b.push('<input class="mc-text mc-node-title" placeholder="' + esc(node.name.replace(/^\d+\s*[.\-_)]\s*/, '')) + '" title="Its own title, e.g. &quot;Himouto! Umaru-chan S&quot;: ✏ Rename files names the folder &quot;S#. title&quot; and its episodes &quot;title - 01&quot;" value="' + esc(node.title || '') + '">');
+      b.push('<input class="mc-text mc-node-title" placeholder="' + esc(node.name.replace(/^\d+\s*[.\-_)]\s*/, '')) + '" title="Its own title, e.g. &quot;Himouto! Umaru-chan S&quot;: ✏ Rename names the folder &quot;S#. title&quot; and its episodes &quot;title - 01&quot;" value="' + esc(node.title || '') + '">');
     }
     if (series && kind === 'file') {
       b.push('<input class="mc-text mc-node-ep" type="number" min="0" max="9999" placeholder="E#" title="Episode number' +
         (node.episodeSource && node.episodeSource !== 'none' ? ' (' + EP_SRC[node.episodeSource] + ')' : '') + '" value="' + (node.episode != null ? node.episode : '') + '">');
     }
-    if (series) b.push(groupSelect(node, 'mc-node-into'));
+    var idle = cur === 'stay' || (cur === 'into' && pendingInto[node.path]);
+    b.push('<button type="button" class="mc-node-btn mc-node-exec"' + (idle ? ' disabled' : '') + ' title="Run the selected action now (logged: undo in 🕘 History)">▶ Execute</button>');
     if (kind === 'file' && node.itemId) b.push('<button type="button" class="mc-node-btn mc-node-play" data-item="' + node.itemId + '" title="Play it here">▶</button>');
     if (node.chosen) b.push('<a class="mc-link mc-node-reset" title="Forget your choice for this line">reset</a>');
     return b.join('');
   }
   function nodeTag(node) {
+    if (!node.chosen) return ''; // suggestions show in the line's dropdown only
     var a = node.action;
     var text = a === 'extras' ? (specialsFolder ? '🎁 to Specials' : '🎁 Jellyfin extra')
-      : a === 'into' ? NODE_TAG.into + (node.target || '').split('/').pop() : NODE_TAG[a] || '';
+      : a === 'into' || a === 'newshow' ? NODE_TAG[a] + (node.target || '').split('/').pop() : NODE_TAG[a] || '';
     if (!text) return '';
     return ' <span class="mc-tag ' + (node.chosen ? 'info' : '') + '" title="' + (node.chosen ? 'Your choice' : 'Suggested: click • Stay to keep it') + '">' +
       esc(text) + (node.chosen ? '' : ' (suggested)') + '</span>';
@@ -647,8 +772,10 @@
     var meta = kind === 'dir'
       ? node.videoCount + ' video' + (node.videoCount === 1 ? '' : 's')
       : isMain ? 'this movie' : p.kind === 'series' ? (node.episode != null ? 'E' + node.episode : 'no episode number') : '';
-    return '<div class="mc-node" data-path="' + esc(node.path) + '" data-kind="' + kind + '" style="--d:' + depth + '">' +
+    return '<div class="mc-node' + (pickedLines[node.path] ? ' mc-node-picked' : '') + '" data-path="' + esc(node.path) + '" data-kind="' + kind +
+        '" data-depth="' + depth + '" style="--d:' + depth + '">' +
         '<div class="mc-node-name">' +
+          '<input type="checkbox" class="mc-node-sel" title="Select this line (bulk actions in the bar above)"' + (pickedLines[node.path] ? ' checked' : '') + '>' +
           (kind === 'dir' ? '<a class="mc-node-open" title="Show / hide its videos">' + (openDirs[node.path] ? '▾' : '▸') + '</a>' : '<span class="mc-node-open"></span>') +
           (kind === 'dir' ? '📁 ' : '🎬 ') + esc(node.name) + ' <span class="mc-meta">' + esc(meta) + '</span>' + nodeTag(node) +
         '</div>' +
@@ -656,9 +783,14 @@
       '</div>' +
       (kind === 'dir' ? nodeChildren(node.path, node.children || [], depth + 1, p) : '');
   }
+  /** An opened folder's path, from the library down (selectable, to check it on the drive). */
+  function pathLine(path, depth, p) {
+    var lib = p.root && (path === p.root || path.indexOf(p.root + '/') === 0) ? p.root.split('/').pop() + (path === p.root ? '' : '/' + short(path, p.root)) : path;
+    return '<div class="mc-node mc-tree-path" style="--d:' + depth + '" title="' + esc(path) + '">📁 ' + esc(lib) + '/</div>';
+  }
   function nodeChildren(path, dirs, depth, p) {
-    var out = dirs.map(function (c) { return nodeLine(c, 'dir', depth, p); }).join('');
     var list = openDirs[path];
+    var out = (list ? pathLine(path, depth, p) : '') + dirs.map(function (c) { return nodeLine(c, 'dir', depth, p); }).join('');
     if (list === 'loading') out += '<div class="mc-node mc-meta" style="--d:' + depth + '">Loading…</div>';
     else if (list) {
       var files = list.filter(function (e) { return !e.isDir; });
@@ -673,6 +805,392 @@
     return { path: p.treeRoot, action: op ? 'into' : '', target: op ? op.to.split('/').slice(0, -1).join('/') : '' };
   }
   function rowTrashed(p) { return (p.ops || []).some(function (o) { return o.note === 'to trash' && (o.from === p.treeRoot || o.from === p.path); }); }
+  function lineBar() {
+    var paths = Object.keys(pickedLines);
+    $('#mcLineBar').hidden = !paths.length;
+    if (!paths.length) return;
+    $('#mcLineCount').textContent = paths.length + ' line' + (paths.length > 1 ? 's' : '') + ' selected:';
+    // what each ticked line will do: the same for all -> shown; different -> "(mixed)", Apply actions runs each line's own
+    var acts = paths.map(lineActionOf);
+    var same = acts.every(function (a) { return a === acts[0]; });
+    var list = [['', same ? 'Set action…' : '(mixed: each line keeps its own)']].concat(type === 'series' ? [['@rename', '✏ Rename'], ['@seasonname', '🔍 Identify season name']] : [],
+      [['stay', '• Stay'], ['up', '⬆ Move up / own show'], ['episode', '📥 Merge into show']].concat(type === 'series' ? [['newshow', '📦 Move to new show…']] : [],
+        [['extras', specialsFolder ? '🎁 Specials' : '🎁 Jellyfin extra'], ['movies', '🎬 Movie'], ['trash', '🗑 Delete']]));
+    var holder = $('#mcLineSetWrap');
+    holder.innerHTML = actionSelect(lineBarInto ? 'into' : same ? acts[0] : '', null, list, type === 'series' ? { path: '/' } : null, 'mc-line-set', 'mc-line-into');
+    $('#mcLineRun').title = same ? 'Run the selected action of these lines now (logged: undo in 🕘 History)'
+      : 'Each line runs its own action (moves first, then renames; logged: undo in 🕘 History)';
+  }
+  /** The action a line is set to: picked (Rename / Identify), "Group with" waiting for a show, or its saved / suggested one. */
+  /** Name for a new show folder made from these lines (suggested from their names). */
+  function askNewShow(paths) {
+    var names = paths.map(function (k) {
+      return k.split('/').pop().replace(/\.[^.\/]+$/, '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/[._]+/g, ' ')
+        .replace(/\s*-?\s*\d{1,4}(v\d)?\s*$/, '').replace(/\s+/g, ' ').trim();
+    });
+    var name = prompt('Name of the new show folder (in the library root; ' + paths.length + ' line(s) move into it on ▶ Execute / Apply actions):',
+      names.length > 1 ? commonTitle(names) : names[0]);
+    name = (name || '').replace(/[\/\\]/g, '-').replace(/[:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
+    return name;
+  }
+  function lineActionOf(k) {
+    if (lineChoice[k]) return lineChoice[k];
+    if (pendingInto[k]) return 'into';
+    var r = planById(pickedLines[k] ? pickedLines[k].row : rowIdForPath(k));
+    var node = r && findNode(r.tree || [], k);
+    if (!node) {
+      var list = openDirs[k.slice(0, k.lastIndexOf('/'))];
+      node = Array.isArray(list) ? list.filter(function (e) { return e.path === k; })[0] : null;
+    }
+    var a = node ? node.action : 'stay';
+    return a === 'season' || a === 'leave' ? 'stay' : a === 'show' ? 'up' : a;
+  }
+  var lineBarInto = false;
+  /** One action for every selected line (saved as each line's choice), then refresh their rows. */
+  function bulkLines(act, target) {
+    var lines = Object.keys(pickedLines).map(function (k) { return { path: k, info: pickedLines[k] }; });
+    if (!lines.length) return;
+    if (act === 'trash' && !confirm('Delete ' + lines.length + ' line(s)? They move to _curator_trash on 📁 Move folders (undo brings them back).')) return;
+    var rows = {};
+    lines.reduce(function (chain, l) {
+      var a = act;
+      if (a === 'stay') a = l.info.kind === 'file' ? 'leave' : 'stay';
+      if (a === 'up' && l.info.series && l.info.kind === 'dir' && l.info.depth === 1) a = 'show';
+      var body = { path: l.path, action: a };
+      if (a === 'into' || a === 'newshow') body.target = target;
+      if (l.info.row) rows[l.info.row] = true;
+      return chain.then(function () { return api('POST', 'FolderRule', body).catch(function () { /* e.g. "into" itself: skipped */ }); });
+    }, Promise.resolve()).then(function () {
+      var ids = Object.keys(rows);
+      var open = Object.keys(openDirs).filter(function (k) { return openDirs[k] !== 'loading' && rows[rowIdForPath(k)]; });
+      return reloadRows(ids).then(function () {
+        return Promise.all(open.map(function (path) {
+          return api('GET', 'Folder?path=' + encodeURIComponent(path)).then(function (l) { openDirs[path] = l || []; }).catch(function () { delete openDirs[path]; });
+        }));
+      }).then(function () { ids.forEach(renderRow); });
+    }).catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
+  }
+  $('#mcLineBar').addEventListener('click', function (e) {
+    if (e.target.id === 'mcLineClear') { pickedLines = {}; lineBarInto = false; lineBar(); render(); return; }
+    if (e.target.id === 'mcLineReset') { Object.keys(pickedLines).forEach(function (k) { delete lineChoice[k]; delete pendingInto[k]; }); bulkLines('auto'); return; }
+    if (e.target.id === 'mcLineRun') applyLineActions(Object.keys(pickedLines));
+  });
+  $('#mcLineBar').addEventListener('change', function (e) {
+    var v = e.target.value;
+    if (e.target.classList.contains('mc-line-into')) { if (v) { lineBarInto = false; bulkLines('into', v); } return; }
+    if (!e.target.classList.contains('mc-line-set') || !v) return;
+    var paths = Object.keys(pickedLines);
+    if (v === 'into') { lineBarInto = true; lineBar(); return; }
+    lineBarInto = false;
+    if (v === 'newshow') {
+      var r1 = planById(pickedLines[paths[0]].row), name1 = askNewShow(paths);
+      if (!name1 || !r1 || !r1.root) { lineBar(); return; }
+      paths.forEach(function (k) { delete lineChoice[k]; delete pendingInto[k]; });
+      bulkLines('newshow', r1.root + '/' + name1);
+      return;
+    }
+    if (v.charAt(0) === '@') {
+      paths.forEach(function (k) { lineChoice[k] = v; delete pendingInto[k]; });
+      lineBar();
+      paths.map(function (k) { return pickedLines[k].row; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).forEach(renderRow);
+      return;
+    }
+    paths.forEach(function (k) { delete lineChoice[k]; delete pendingInto[k]; });
+    bulkLines(v);
+  });
+  /** ▶ Apply actions: each ticked line runs its selected action - moves first (one job), then renames (one job). */
+  function applyLineActions(paths) {
+    var row = function (k) { return pickedLines[k] ? pickedLines[k].row : rowIdForPath(k); };
+    var names = paths.filter(function (k) { return lineChoice[k] === '@seasonname'; });
+    if (names.length) {
+      // one search window per season folder, the next opens after you pick a name
+      paths = paths.filter(function (k) { return names.indexOf(k) < 0; });
+      if (!paths.length) { openSeasonBatch(names); return; }
+      seasonBatchAfter = names;
+    }
+    var renames = paths.filter(function (k) { return lineChoice[k] === '@rename'; });
+    var moves = paths.filter(function (k) { return !lineChoice[k]; });
+    if (!renames.length && !moves.length) { if (seasonBatchAfter) { var n0 = seasonBatchAfter; seasonBatchAfter = null; openSeasonBatch(n0); } else Dashboard.alert('Nothing to run: pick an action for the selected lines first.'); return; }
+    if (!confirm('Run the selected actions now?\n' + (moves.length ? '• ' + moves.length + ' line(s): their move / delete / group action\n' : '') +
+        (renames.length ? '• ' + renames.length + ' line(s): rename by the naming rules\n' : '') + 'Undo: 🕘 History.')) return;
+    (moves.length ? runLines(moves, moves.map(row), 'move', true) : Promise.resolve()).then(function () {
+      return renames.length ? runLines(renames, renames.map(row), 'rename', true) : null;
+    }).then(function () { if (seasonBatchAfter) { var n1 = seasonBatchAfter; seasonBatchAfter = null; openSeasonBatch(n1); } });
+  }
+
+  /** Run the chosen actions of these lines now (one logged folder job, only their changes). */
+  /** Identify a video that is its own movie / show (a line in a folder tree). */
+  function identifyLine(path, rowId) {
+    var list = openDirs[path.slice(0, path.lastIndexOf('/'))] || [];
+    var e = list.filter(function (x) { return x.path === path; })[0];
+    if (!e || !e.itemId) return;
+    if (!itemById(e.itemId)) {
+      var row = planById(rowId) || {};
+      lineItems[e.itemId] = { itemId: e.itemId, jellyfinName: e.name.replace(/\.[^.]+$/, ''), kind: e.itemType === 'Series' ? 'series' : 'movie',
+        path: e.path, root: row.root, providerIds: {}, ops: [], warnings: [] };
+    }
+    openIdentify(e.itemId);
+  }
+  // ---------------------------------------------------------------- batch: season names (like "Identify selected", for season folders)
+  var sb = [];
+  function openSeasonBatch(paths) {
+    sb = paths.map(function (k) {
+      var rowId = pickedLines[k] ? pickedLines[k].row : rowIdForPath(k), r = planById(rowId), node = (r && findNode(r.tree || [], k)) || {};
+      return { path: k, row: rowId, season: node.season, query: node.title || k.split('/').pop().replace(/^\d+\s*[.\-_)]\s*/, ''),
+        results: [], pick: -1, checked: false, status: 'waiting…' };
+    });
+    showModal('#mcSeasonBatch');
+    renderSb();
+    searchSb(sb);
+  }
+  function searchSb(items) {
+    var providers = chosenSources();
+    $('#mcSbStatus').textContent = 'Searching ' + providers.join(', ') + '…';
+    items.reduce(function (chain, it) {
+      return chain.then(function () {
+        var r = planById(it.row);
+        if (!r) { it.status = 'show not found'; renderSb(); return null; }
+        it.status = 'searching…'; renderSb();
+        return searchSources({ itemId: r.itemId, kind: 'series' }, { Name: it.query, ProviderIds: {} }, providers).then(function (found) {
+          it.results = found.results;
+          var best = bestMatch(found.results, it.query, '');
+          it.pick = best >= 0 ? best : (found.results.length ? 0 : -2);
+          it.checked = best >= 0;
+          it.status = found.results.length ? found.results.length + ' result(s)' : 'nothing found: type a name and pick "use what I typed"';
+          renderSb();
+        }, function () { it.status = 'search failed'; renderSb(); });
+      });
+    }, Promise.resolve()).then(function () { $('#mcSbStatus').textContent = 'Done. Tick the rows to apply, then Apply checked.'; });
+  }
+  function renderSb() {
+    $('#mcSbList').innerHTML = sb.map(function (it, i) {
+      return '<div class="mc-sb-row" data-i="' + i + '">' +
+        '<input type="checkbox" class="mc-sb-check"' + (it.checked ? ' checked' : '') + (it.pick === -1 ? ' disabled' : '') + '>' +
+        '<b>📁 ' + esc(it.path.split('/').pop()) + '</b>' +
+        '<input class="mc-text mc-sb-q" value="' + esc(it.query) + '" title="Search for (or the name to use)">' +
+        '<button is="emby-button" type="button" class="raised mc-btn mc-sb-again"><span>🔍</span></button>' +
+        '<select class="mc-text mc-sb-pick">' + it.results.slice(0, 20).map(function (r, k) {
+          return '<option value="' + k + '"' + (it.pick === k ? ' selected' : '') + '>' + esc(r.Name) + ' (' + esc(r.ProductionYear || '?') + ' · ' + esc(r.SearchProviderName || '') + ')</option>';
+        }).join('') + '<option value="-2"' + (it.pick === -2 ? ' selected' : '') + '>✎ use what I typed</option></select>' +
+        '<span class="mc-meta">' + esc(it.status) + '</span></div>';
+    }).join('') || '<p class="mc-meta">No season folders selected.</p>';
+    var all = sb.filter(function (x) { return x.pick !== -1; });
+    $('#mcSbAll').checked = all.length > 0 && all.every(function (x) { return x.checked; });
+  }
+  $('#mcSbList').addEventListener('change', function (e) {
+    var rowEl = e.target.closest('.mc-sb-row'); if (!rowEl) return;
+    var it = sb[parseInt(rowEl.getAttribute('data-i'), 10)];
+    if (e.target.classList.contains('mc-sb-check')) it.checked = e.target.checked;
+    if (e.target.classList.contains('mc-sb-pick')) { it.pick = parseInt(e.target.value, 10); it.checked = true; }
+    if (e.target.classList.contains('mc-sb-q')) it.query = e.target.value.trim();
+    renderSb();
+  });
+  $('#mcSbList').addEventListener('click', function (e) {
+    if (!e.target.closest('.mc-sb-again')) return;
+    var rowEl = e.target.closest('.mc-sb-row'), it = sb[parseInt(rowEl.getAttribute('data-i'), 10)];
+    it.query = rowEl.querySelector('.mc-sb-q').value.trim() || it.query;
+    searchSb([it]);
+  });
+  $('#mcSbSearch').addEventListener('click', function () { searchSb(sb); });
+  $('#mcSbAll').addEventListener('change', function (e) {
+    sb.forEach(function (x) { if (x.pick !== -1) x.checked = e.target.checked; });
+    renderSb();
+  });
+  $('#mcSbApply').addEventListener('click', function () {
+    var todo = sb.filter(function (x) { return x.checked && x.pick !== -1; });
+    if (!todo.length) { Dashboard.alert('Tick the rows to apply first.'); return; }
+    var rows = {};
+    todo.reduce(function (chain, it) {
+      var name = it.pick === -2 ? it.query : it.results[it.pick].Name;
+      rows[it.row] = true;
+      return chain.then(function () { return api('POST', 'FolderRule', { path: it.path, action: 'stay', season: it.season != null ? it.season : null, title: name }); });
+    }, Promise.resolve()).then(function () {
+      hideModal('#mcSeasonBatch');
+      todo.forEach(function (it) { delete lineChoice[it.path]; });
+      return reloadRows(Object.keys(rows));
+    }).then(function () {
+      Dashboard.alert(todo.length + ' season title(s) set. Now ✏ Rename those folders (Set action → ✏ Rename → Apply actions).');
+    }).catch(function (e) { Dashboard.alert('Could not save: ' + e.message); });
+  });
+
+  var seasonQueue = []; // (single windows queue, unused by the batch window)
+  var seasonBatchAfter = null; // season folders whose names window opens after the other line actions ran
+  function nextSeasonName() {
+    var next = seasonQueue.shift();
+    if (!next) return;
+    delete lineChoice[next.path];
+    var row = planById(next.row), node = row && findNode(row.tree || [], next.path);
+    identifySeasonName(next.path, next.row, node ? node.season : null);
+  }
+  /** Search the metadata sources for a season folder's exact name ("Himouto! Umaru-chan S"): it becomes its title. */
+  function identifySeasonName(path, rowId, season) {
+    var row = planById(rowId);
+    if (!row) return;
+    var node = findNode(row.tree || [], path) || {};
+    var key = 'season:' + path;
+    lineItems[key] = {
+      itemId: row.itemId, // searches need a real item: the show the season belongs to
+      jellyfinName: node.title || path.split('/').pop().replace(/^\d+\s*[.\-_)]\s*/, ''),
+      kind: 'series', path: path, root: row.root, providerIds: {}, ops: [], warnings: [],
+      seasonPath: path, seasonNo: season != null ? season : node.season, rowId: rowId
+    };
+    openIdentify(key, 'title');
+  }
+  function findNode(nodes, path) {
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].path === path) return nodes[i];
+      var hit = findNode(nodes[i].children || [], path);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  function runLines(paths, rowIds, mode, confirmed) {
+    mode = mode || 'move';
+    paths = paths.filter(Boolean);
+    var ids = rowIds.filter(function (x, i, all) { return x && all.indexOf(x) === i; });
+    if (!paths.length || !ids.length) return Promise.resolve();
+    if (!confirmed && !confirm(mode === 'rename'
+        ? 'Rename ' + (paths.length === 1 ? 'this line' : paths.length + ' lines') + ' now by the naming rules?\nOnly names change. Undo: 🕘 History.'
+        : 'Run the action of ' + paths.length + ' line(s) now?\nOnly their moves happen (names stay). Undo: 🕘 History.')) return Promise.resolve();
+    var body = opts(); body.itemIds = ids; body.ids = ids.join(','); body.mode = mode; body.paths = paths;
+    progress('#mcProgress', { text: (mode === 'rename' ? 'Renaming ' : 'Running ') + paths.length + ' line(s)…' });
+    return new Promise(function (finish) {
+    api('POST', 'FolderJobs/Apply', body).then(function (job) {
+      watchJob(job.id, 'folders', function (j) {
+        progress('#mcProgress', j.finished ? null : { done: j.done, total: j.total, text: j.current || 'queued (another folder job is running)…' });
+      }, function (j) {
+        progress('#mcProgress', null);
+        var r = j.result || { done: 0, errors: ['no result'] };
+        paths.forEach(function (k) { delete pickedLines[k]; delete lineChoice[k]; delete pendingInto[k]; });
+        loadScan().then(function () {
+          Dashboard.alert(r.done ? 'Done: ' + r.done + ' change(s).' + (r.errors.length ? '\n\nErrors:\n' + r.errors.join('\n') : '') + '\n\n' + scanNote()
+            : mode === 'rename' ? 'Nothing to rename there: the names already follow the rules.'
+            : 'Nothing to do for those lines (their action is "Stay", or it was already done).');
+          return load();
+        }).then(finish, finish);
+      });
+    }).catch(function (e) { progress('#mcProgress', null); Dashboard.alert('Could not start: ' + e.message); finish(); });
+    });
+  }
+  function rowSplit(p) { return (p.ops || []).some(function (o) { return o.note === 'split'; }); }
+  // ---------------------------------------------------------------- batch: group into collections (like "Identify selected")
+  var cb = [];
+  var serverCollections = []; // every collection in Jellyfin (movies and shows), so both tabs offer all of them
+  function loadCollections() {
+    return api('GET', 'Collections').then(function (list) { serverCollections = (list || []).map(function (c) { return c.name; }); })
+      .catch(function () { /* keep what we had */ });
+  }
+  function allCollections() {
+    var names = {};
+    serverCollections.forEach(function (c) { names[c] = true; });
+    plans.forEach(function (x) { (x.collections || []).forEach(function (c) { names[c] = true; }); });
+    return Object.keys(names).sort(function (a, b) { return a.localeCompare(b); });
+  }
+  /** A suggested collection per item: an existing one its title starts with, else what it shares with the others selected. */
+  function suggestCollections(rows) {
+    var existing = allCollections();
+    var lower = function (s) { return (s || '').toLowerCase(); };
+    var byTmdb = {};
+    rows.forEach(function (p) { var k = (p.providerIds || {}).TmdbCollection; if (k) (byTmdb[k] = byTmdb[k] || []).push(p); });
+    return rows.map(function (p) {
+      var title = p.jellyfinName || '';
+      if ((p.collections || []).length) return p.collections[0];
+      var hit = existing.filter(function (c) { return lower(title).indexOf(lower(c)) === 0; }).sort(function (a, b) { return b.length - a.length; })[0];
+      if (hit) return hit;
+      var k = (p.providerIds || {}).TmdbCollection;
+      if (k && byTmdb[k].length > 1) return commonTitle(byTmdb[k].map(function (x) { return x.jellyfinName; }));
+      // the longest start (whole words) it shares with another selected title
+      var best = '';
+      rows.forEach(function (o) {
+        if (o === p) return;
+        var c = commonTitle([title, o.jellyfinName || '']);
+        if (c !== title && c.length > best.length && c.length >= 4) best = c;
+      });
+      return best;
+    });
+  }
+  function openCollBatch(rows) {
+    var sugg = suggestCollections(rows);
+    cb = rows.map(function (p, i) { return { p: p, name: sugg[i] || '', checked: !!sugg[i] && (p.collections || []).indexOf(sugg[i]) < 0 }; });
+    showModal('#mcCollBatch');
+    renderCb();
+  }
+  function renderCb() {
+    var names = allCollections();
+    cb.forEach(function (x) { if (x.name && names.indexOf(x.name) < 0) names.push(x.name); });
+    names.sort(function (a, b) { return a.localeCompare(b); });
+    $('#mcCbList').innerHTML = cb.map(function (x, i) {
+      var already = (x.p.collections || []).indexOf(x.name) >= 0;
+      return '<div class="mc-sb-row" data-i="' + i + '">' +
+        '<input type="checkbox" class="mc-cb-check"' + (x.checked ? ' checked' : '') + (x.name && !already ? '' : ' disabled') + '>' +
+        '<b>' + esc(x.p.jellyfinName) + ' <span class="mc-meta">(' + esc(x.p.year || '?') + ')</span></b>' +
+        '<select class="mc-text mc-cb-pick"><option value="">(none)</option>' + names.map(function (n) {
+          return '<option value="' + esc(n) + '"' + (n === x.name ? ' selected' : '') + '>' + esc(n) + (allCollections().indexOf(n) < 0 ? ' (new)' : '') + '</option>';
+        }).join('') + '</select>' +
+        '<input class="mc-text mc-cb-name" value="' + esc(x.name) + '" placeholder="or type a name">' +
+        '<span class="mc-meta">' + (already ? 'already in it' : (x.p.collections || []).length ? 'in: ' + esc(x.p.collections.join(', ')) : '') + '</span></div>';
+    }).join('');
+    var can = cb.filter(function (x) { return x.name && (x.p.collections || []).indexOf(x.name) < 0; });
+    $('#mcCbAll').checked = can.length > 0 && can.every(function (x) { return x.checked; });
+  }
+  $('#mcCbList').addEventListener('change', function (e) {
+    var r = e.target.closest('.mc-sb-row'); if (!r) return;
+    var x = cb[parseInt(r.getAttribute('data-i'), 10)];
+    if (e.target.classList.contains('mc-cb-check')) x.checked = e.target.checked;
+    if (e.target.classList.contains('mc-cb-pick') || e.target.classList.contains('mc-cb-name')) { x.name = e.target.value.trim(); x.checked = !!x.name; }
+    renderCb();
+  });
+  $('#mcCbAll').addEventListener('change', function (e) {
+    cb.forEach(function (x) { if (x.name && (x.p.collections || []).indexOf(x.name) < 0) x.checked = e.target.checked; });
+    renderCb();
+  });
+  $('#mcCbSetAllGo').addEventListener('click', function () {
+    var n = $('#mcCbSetAll').value.trim();
+    if (!n) return;
+    cb.forEach(function (x) { x.name = n; x.checked = (x.p.collections || []).indexOf(n) < 0; });
+    renderCb();
+  });
+  $('#mcCbApply').addEventListener('click', function () {
+    var todo = cb.filter(function (x) { return x.checked && x.name; });
+    if (!todo.length) { Dashboard.alert('Tick the rows to apply first.'); return; }
+    var groups = {};
+    todo.forEach(function (x) {
+      var ids = (x.p.members && x.p.members.length ? x.p.members.map(function (m) { return m.itemId; }) : []).concat([x.p.itemId]);
+      groups[x.name] = (groups[x.name] || []).concat(ids);
+    });
+    Object.keys(groups).reduce(function (chain, n) {
+      return chain.then(function () { return api('POST', 'Collections', { name: n, itemIds: groups[n] }); });
+    }, Promise.resolve()).then(function () {
+      hideModal('#mcCollBatch');
+      selected = {};
+      return loadCollections().then(function () { return reloadRows(todo.map(function (x) { return x.p.itemId; })); });
+    }).then(function () {
+      render();
+      Dashboard.alert(todo.length + ' item(s) put in ' + Object.keys(groups).length + ' collection(s).');
+    }).catch(function (e) { Dashboard.alert('Could not group them: ' + e.message); });
+  });
+
+  var collImgVersion = Date.now(); // bumped after a new poster, so the frame shows it
+  $('#mcList').addEventListener('change', function (e) {
+    if (!e.target.classList.contains('mc-coll-img') || !e.target.value) return;
+    var frame = e.target.closest('.mc-cframe'), name = frame.getAttribute('data-coll'), from = e.target.value;
+    api('POST', 'Collections/Image', { name: name, fromItemId: from }).then(function () {
+      collImgVersion = Date.now();
+      var ids = plans.filter(function (x) { return (x.collections || []).indexOf(name) >= 0; }).map(function (x) { return x.itemId; });
+      return reloadRows(ids);
+    }).then(render).catch(function (err) { Dashboard.alert('Could not set the poster: ' + err.message); });
+  });
+  /** "Group with": add the show / movie to a collection (the group; the curator shows a collection as one frame). */
+  function collectionSelect(p) {
+    var names = {};
+    allCollections().forEach(function (c) { names[c] = true; });
+    var mine = p.collections || [];
+    return '<select class="mc-text mc-root-coll" title="Group it with others: put it in a collection (shown together as one frame)">' +
+      '<option value="">📚 Group with…</option>' +
+      Object.keys(names).sort(function (a, b) { return a.localeCompare(b); }).filter(function (c) { return mine.indexOf(c) < 0; })
+        .map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('') +
+      '<option value="+">＋ New collection…</option></select>';
+  }
   function treeBlock(p) {
     if (!p.treeRoot) return '';
     var body = nodeChildren(p.treeRoot, p.tree || [], 1, p);
@@ -757,7 +1275,11 @@
             '"><span>▶</span></button>' +
           (p.treeRoot ? '<button is="emby-button" type="button" class="raised mc-btn mc-root-files" title="Show / hide the videos in this folder"><span>📂 Files ' +
             (openDirs[p.treeRoot] ? '▾' : '▸') + '</span></button>' : '') +
-          (p.kind === 'series' && p.treeRoot ? groupSelect(rootNode(p), 'mc-root-into') : '') +
+          collectionSelect(p) +
+          (p.kind === 'series' && p.treeRoot && (rowSplit(p) || (p.tree || []).filter(function (n) { return n.depth === 1 && n.videoCount > 1; }).length >= 2)
+            ? '<button is="emby-button" type="button" class="raised mc-btn mc-root-split' + (rowSplit(p) ? ' button-submit' : '') + '" title="' +
+              (rowSplit(p) ? 'Planned: each subfolder becomes a show of its own. Click to cancel' : 'Each subfolder becomes a show of its own in the library (on 📁 Move folders); group them with a collection') +
+              '"><span>📤 ' + (rowSplit(p) ? 'Split planned ✓' : 'Split into shows') + '</span></button>' : '') +
           '<button is="emby-button" type="button" class="raised mc-btn mc-root-trash' + (rowTrashed(p) ? ' button-submit' : '') + '" title="' +
             (rowTrashed(p) ? 'Keep it after all' : 'Delete the whole ' + (p.kind === 'series' ? 'show folder' : 'movie') + ': moves to _curator_trash on Move folders (undo brings it back)') +
             '"><span>' + (rowTrashed(p) ? '↩ Keep' : '🗑 Delete') + '</span></button>' +
@@ -865,9 +1387,7 @@
   function visible() {
     var f = $('#mcFilter').value.toLowerCase();
     var tests = FILTERS[type].filter(function (d) { return activeFilters[type].indexOf(d.key) >= 0; });
-    var showEmpty = activeFilters[type].indexOf('empty') >= 0;
     return plans.filter(function (p) {
-      if (p.empty && !showEmpty) return false; // leftover folders with no episodes: only via the 🗑 filter
       for (var i = 0; i < tests.length; i++) if (!tests[i].test(p)) return false;
       if (f && (p.jellyfinName + ' ' + (p.originalTitle || '') + ' ' + p.title + ' ' + p.path).toLowerCase().indexOf(f) < 0) return false;
       return true;
@@ -896,11 +1416,10 @@
     };
     act('#mcBatchIdentify', '🔍 Identify', n);
     act('#mcMoveUp', '📤 Move up', count(movesUp));
-    act('#mcGroupNew', '📁 Group into new folder…', type === 'series' ? count(function (p) { return !!p.treeRoot; }) : 0);
     act('#mcMoveFolders', '📁 Move folders', count(function (p) { return p.ops.some(placeOp); }));
     act('#mcRenameFiles', '✏ Rename files', count(function (p) { return p.ops.some(function (o) { return !placeOp(o) && o.kind !== 'mkdir'; }); }));
     var toCollection = collectionMode();
-    act('#mcCombine', toCollection ? '📚 Add to collection' : '🔗 Combine', toCollection ? n : (n >= 2 ? n : 0));
+    act('#mcCombine', toCollection ? '📚 Group into collections…' : '🔗 Combine', toCollection ? n : (n >= 2 ? n : 0));
     $('#mcCombine').title = toCollection ? 'Put the selected items (e.g. the seasons or films of one franchise) into a Jellyfin collection'
       : 'Treat the selected series folders as one show (merged as seasons)';
     act('#mcVerifySel', '✓ Mark verified', count(function (p) { return !p.verified; }));
@@ -911,28 +1430,72 @@
   }
 
   function groupByCollection() { return $('#mcGroupColl').checked; }
+  /** The folder grouping this row (a folder between it and the library root), or null. */
+  function groupOf(p) {
+    var own = p.treeRoot || (p.kind === 'movie' ? p.path.slice(0, p.path.lastIndexOf('/')) : null);
+    if (!own || !p.root) return null;
+    var parent = own.slice(0, own.lastIndexOf('/'));
+    return parent && parent !== p.root && parent.indexOf(p.root + '/') === 0 ? parent : null;
+  }
+  var collapsed = {}; // collection name -> true: its frame is folded
+  try { collapsed = JSON.parse(localStorage.getItem('mcCollapsed') || '{}') || {}; } catch (e) { collapsed = {}; }
+  function saveCollapsed() { try { localStorage.setItem('mcCollapsed', JSON.stringify(collapsed)); } catch (e) { /* not remembered */ } }
+  /** One collection as a frame: header (fold, poster, name, count, poster picker) and its rows unless folded. */
+  function collectionFrame(c, members) {
+    var ci = {};
+    members.some(function (m) { ci = (m.collectionInfo || {})[c] || {}; return !!ci.id; });
+    var folded = !!collapsed[c];
+    return '<div class="mc-cframe' + (folded ? ' mc-folded' : '') + '" data-coll="' + esc(c) + '"><div class="mc-coll-head">' +
+        '<a class="mc-cframe-fold" title="' + (folded ? 'Expand' : 'Collapse') + '">' + (folded ? '▸' : '▾') + '</a>' +
+        (ci.id ? '<img class="mc-coll-poster mc-cframe-fold" alt="" src="' + esc(ApiClient.getUrl('Items/' + ci.id + '/Images/Primary', { maxHeight: 120, quality: 85 })) +
+          '&v=' + collImgVersion + '" onerror="this.style.display=\'none\'">' : '') +
+        '<a class="mc-cframe-fold mc-cframe-name">📚 ' + esc(c) + '<span class="mc-meta">' + noun(members.length) + (ci.hasImage ? '' : ' · no poster yet') + '</span></a>' +
+        '<span class="mc-cframe-acts">' +
+          '<select class="mc-text mc-coll-img" title="Give the collection the poster (and backdrop) of one of its shows"><option value="">🖼 Poster from…</option>' +
+            members.map(function (m) { return '<option value="' + m.itemId + '">' + esc(m.jellyfinName) + '</option>'; }).join('') + '</select>' +
+          (ci.id ? '<a is="emby-linkbutton" class="raised emby-button mc-btn" href="#/details?id=' + ci.id + '&serverId=' + ApiClient.serverId() + '" title="Open the collection in Jellyfin">↗ Open</a>' : '') +
+        '</span>' +
+      '</div>' + (folded ? '' : members.map(row).join('')) + '</div>';
+  }
   function render() {
+    // emptied show folders (no episode files left) first, so they're easy to clean up
     var rows = visible(), html;
-    if (groupByCollection() && rows.length) {
-      // each row once, under its first collection (alphabetical); the rest last
+    rows = rows.filter(function (p) { return p.empty; }).concat(rows.filter(function (p) { return !p.empty; }));
+    $('#mcCollAll').hidden = !groupByCollection();
+    if (groupByCollection()) {
+      // not in a collection first, then one frame per collection (A-Z)
       var groups = {}, rest = [];
       rows.forEach(function (p) {
         var c = (p.collections || [])[0];
         if (c) (groups[c] = groups[c] || []).push(p); else rest.push(p);
       });
-      var head = function (title, n) { return '<div class="mc-coll-head">' + title + '<span class="mc-meta">' + noun(n) + '</span></div>'; };
-      html = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b); }).map(function (c) {
-        return head('📚 ' + esc(c), groups[c].length) + groups[c].map(row).join('');
-      }).join('') + (rest.length ? head('Not in a collection', rest.length) + rest.map(row).join('') : '');
+      html = rest.map(row).join('') +
+        Object.keys(groups).sort(function (a, b) { return a.localeCompare(b); }).map(function (c) { return collectionFrame(c, groups[c]); }).join('');
     } else {
       html = rows.map(row).join('');
     }
     $('#mcList').innerHTML = html || '<p class="mc-meta" style="padding:1em">Nothing to show.</p>';
     summary();
   }
-  try { $('#mcGroupColl').checked = localStorage.getItem('mcGroupColl') === '1'; } catch (e) { /* storage blocked: default off */ }
+  // on unless you switched it off (remembered in this browser)
+  try { $('#mcGroupColl').checked = localStorage.getItem('mcGroupColl') !== '0'; } catch (e) { $('#mcGroupColl').checked = true; }
   $('#mcGroupColl').addEventListener('change', function () {
     try { localStorage.setItem('mcGroupColl', groupByCollection() ? '1' : '0'); } catch (e) { /* not remembered */ }
+    render();
+  });
+  $('#mcList').addEventListener('click', function (e) {
+    if (!e.target.closest('.mc-cframe-fold')) return;
+    var c = e.target.closest('.mc-cframe').getAttribute('data-coll');
+    if (collapsed[c]) delete collapsed[c]; else collapsed[c] = true;
+    saveCollapsed();
+    render();
+  });
+  $('#mcCollAll').addEventListener('click', function (e) {
+    var all = e.target.closest('[data-fold]');
+    if (!all) return;
+    if (all.getAttribute('data-fold') === 'open') collapsed = {};
+    else plans.forEach(function (p) { (p.collections || []).forEach(function (c) { collapsed[c] = true; }); });
+    saveCollapsed();
     render();
   });
 
@@ -940,6 +1503,7 @@
     var el = page.querySelector('.mc-row[data-id="' + id + '"]'), p = planById(id);
     if (el && p) el.outerHTML = row(p);
     summary();
+    lineBar(); // the bar shows what the ticked lines are set to
   }
 
   /**
@@ -1046,6 +1610,7 @@
     dock.hidden = !lines.length || anyModalOpen();
     if (dock.hidden) return;
     fitToContent();
+    $('#mcDockAll').hidden = !lines.some(function (j) { return j.finished; });
     $('#mcDockList').innerHTML = lines.map(function (j) {
       var pct = j.finished ? 100 : j.total ? Math.round(100 * j.done / j.total) : 0;
       return '<div class="mc-dock-line" data-job="' + j.id + '" data-kind="' + j.kind + '" title="Click to show the details">' +
@@ -1058,6 +1623,11 @@
       '</div>';
     }).join('');
   }
+  $('#mcDockAll').addEventListener('click', function (e) {
+    e.stopPropagation();
+    jobs.forEach(function (j) { if (j.finished) dismissed[j.id] = true; });
+    renderDock();
+  });
   // Stop: first click = finish the current item; second click within 3 s = stop now
   page.addEventListener('click', function (e) {
     var b = e.target.closest('.mc-stop');
@@ -1186,6 +1756,7 @@
   }
 
   function load() {
+    loadCollections().then(function () { if (plans.length) render(); }); // all collections, for both tabs
     $('#mcSummary').textContent = 'Loading…';
     progress('#mcProgress', { text: 'Loading ' + (type === 'series' ? 'series' : 'movies') + ' and building the preview…' });
     var o = opts();
@@ -1193,6 +1764,9 @@
         '&flatten=' + o.flatten)
       .then(function (data) {
         plans = data;
+        // a full reload follows moves / renames: ticked lines may not exist any more
+        Object.keys(pickedLines).forEach(function (k) { if (!rowIdForPath(k)) delete pickedLines[k]; });
+        lineBar();
         Object.keys(selected).forEach(function (k) { if (!planById(k)) delete selected[k]; });
         render();
         progress('#mcProgress', null);
@@ -1222,9 +1796,11 @@
   });
 
   // ---------------------------------------------------------------- search sources
-  function storageKey() { return 'movieCurator.sources.' + type; }
+  function storageKey() { return 'movieCurator.sources.v2.' + type; }
+  /** Every source, except strictly rate-limited ones (1 s or more between requests: AniDB, AniSearch) - tick those by hand. */
+  function strictSource(n) { return (THROTTLE[n] || 0) >= 1000; }
   function defaultSources(list) {
-    var d = list.filter(function (n) { return n === 'TheMovieDb' || (type === 'series' && n === 'AniList'); });
+    var d = list.filter(function (n) { return !strictSource(n); });
     return d.length ? d : list.slice(0, 1);
   }
   function chosenSources() {
@@ -1253,10 +1829,16 @@
 
   function pickerHtml(chosen) {
     var list = available[type] || [];
-    return '<details class="mc-sources"><summary>Sources: ' + esc(chosen.join(', ') || 'none') + ' ▾</summary><div class="mc-sources-list">' +
+    var normal = list.filter(function (n) { return !strictSource(n); });
+    var all = normal.length > 0 && normal.every(function (n) { return chosen.indexOf(n) >= 0; });
+    var extra = chosen.filter(strictSource);
+    var label = all ? 'All' + (extra.length ? ' + ' + extra.join(', ') : '') : chosen.join(', ') || 'none';
+    return '<details class="mc-sources"><summary>Sources: ' + esc(label) + ' ▾</summary><div class="mc-sources-list">' +
+      '<label><input type="checkbox" class="mc-source-all"' + (all ? ' checked' : '') + '> <b>All</b><span class="mc-note">every source except the rate-limited ones</span></label>' +
       list.map(function (n) {
         return '<label><input type="checkbox" class="mc-source" value="' + esc(n) + '"' + (chosen.indexOf(n) >= 0 ? ' checked' : '') + '> ' + esc(n) +
-          (NOTES[n] ? '<span class="mc-note">' + esc(NOTES[n]) + '</span>' : '') + '</label>';
+          (strictSource(n) ? '<span class="mc-note">rate-limited: slow, and too many searches get you banned</span>'
+            : NOTES[n] ? '<span class="mc-note">' + esc(NOTES[n]) + '</span>' : '') + '</label>';
       }).join('') + '</div></details>';
   }
   /** The batch picker sets the remembered sources; the search window's picker only affects that one search. */
@@ -1269,9 +1851,14 @@
     });
   }
   page.addEventListener('change', function (e) {
-    if (!e.target.classList.contains('mc-source')) return;
+    if (!e.target.classList.contains('mc-source') && !e.target.classList.contains('mc-source-all')) return;
     var picker = e.target.closest('.mc-source-picker');
     var list = Array.prototype.slice.call(picker.querySelectorAll('.mc-source:checked')).map(function (x) { return x.value; });
+    if (e.target.classList.contains('mc-source-all')) {
+      var normal = (available[type] || []).filter(function (n) { return !strictSource(n); });
+      var strict = list.filter(strictSource);
+      list = e.target.checked ? normal.concat(strict) : normal.slice(0, 1).concat(strict);
+    }
     if (!list.length) { e.target.checked = true; return; } // keep at least one
     if (picker.getAttribute('data-scope') === 'identify') identifySources = list; else saveSources(list);
     renderPickers();
@@ -1347,7 +1934,8 @@
     return api('POST', 'IdentifyJobs', {
       type: type,
       items: entries.map(function (e) {
-        return { itemId: e.p.itemId, name: e.p.jellyfinName, result: e.result, replaceImages: e.replaceImages !== false };
+        // its path too: the job finds it again by path if an earlier queued job moved / renamed it (new id)
+        return { itemId: e.p.itemId, path: e.p.treeRoot || e.p.path || null, name: e.p.jellyfinName, result: e.result, replaceImages: e.replaceImages !== false };
       }),
       lockAfter: $('#mcLockAfter').checked, writeNfo: $('#mcNfo').checked, lockNfo: $('#mcLockNfo').checked
     });
@@ -1378,11 +1966,11 @@
     identifyMode = mode || 'apply';
     pickIndex = b ? index : null;
     identifySources = chosenSources();
-    $('#mcIdTitle').textContent = (b ? 'Find a match for: ' : 'Identify: ') + p.jellyfinName;
+    $('#mcIdTitle').textContent = (mode === 'title' ? 'Season name for: ' : b ? 'Find a match for: ' : 'Identify: ') + p.jellyfinName;
     $('#mcIdWhere').textContent = '📁 ' + where(p.root ? p : Object.assign({ root: (plans.filter(function (x) {
       return (x.members || []).some(function (m) { return m.itemId === p.itemId; });
     })[0] || {}).root }, p));
-    $('#mcIdImagesWrap').style.display = b ? 'none' : '';
+    $('#mcIdImagesWrap').style.display = b || mode === 'title' ? 'none' : '';
     $('#mcIdName').value = b ? b.query : (p.guessName || p.jellyfinName);
     $('#mcIdYear').value = b ? (b.year || '') : (p.guessYear || '');
     $('#mcIdImdb').value = '';
@@ -1423,7 +2011,7 @@
           '<span class="mc-meta">' + esc(idText(r.ProviderIds)) + '</span>' +
           (r.Overview ? '<span class="mc-ov">' + esc(r.Overview) + '</span>' : '') +
           '<button is="emby-button" type="button" class="raised button-submit mc-btn mc-apply-result" data-i="' + i + '"><span>' +
-            (identifyMode === 'pick' ? 'Use this' : 'Apply') + '</span></button>' +
+            (identifyMode === 'pick' ? 'Use this' : identifyMode === 'title' ? 'Use this name' : 'Apply') + '</span></button>' +
         '</div>';
       }).join('');
     }).catch(function (e) { $('#mcIdStatus').textContent = 'Search failed: ' + e.message; });
@@ -1434,6 +2022,14 @@
     var b = e.target.closest('.mc-apply-result');
     if (!b) return;
     var p = identifyItem || itemById(identifyId), r = lastResults[parseInt(b.getAttribute('data-i'), 10)];
+    if (identifyMode === 'title') {
+      hideModal('#mcIdentify');
+      saveNode({ path: p.seasonPath, action: 'stay', season: p.seasonNo != null ? p.seasonNo : null, title: r.Name }).then(function () {
+        if (seasonQueue.length) { nextSeasonName(); return; } // batch: straight on to the next folder
+        Dashboard.alert('Season title set: "' + r.Name + '".\n✏ Rename now (on that folder) names it "' + (p.seasonNo != null ? p.seasonNo : 'S#') + '. ' + r.Name + '" and its episodes "' + r.Name + ' - 01".');
+      });
+      return;
+    }
     if (identifyMode === 'pick') {
       // put the chosen result into the batch row; nothing is applied until "Apply checked"
       var row = batch[pickIndex];
@@ -1504,7 +2100,9 @@
           '<div class="mc-meta">' + (b.manual ? '<span class="mc-tag info">manual pick</span> ' : 'searched: ') +
             esc(b.query || '') + (b.year ? ' (' + b.year + ')' : '') + '</div>' +
           '<button is="emby-button" type="button" class="raised mc-btn mc-batch-manual" data-i="' + i + '" style="margin-top:.3em">' +
-            '<span>🔍 Manual search…</span></button>' +
+            '<span>🔍 Manual search…</span></button> ' +
+          '<button is="emby-button" type="button" class="raised mc-btn mc-batch-retry" data-i="' + i + '" style="margin-top:.3em" title="Search this one again (same name and sources)">' +
+            '<span>↻ Retry</span></button>' +
           (b.status ? '<div class="' + (b.status.indexOf('✔') === 0 || b.status.indexOf('…') === 0 ? 'mc-meta' : 'mc-warn') + '">' + esc(b.status) + '</div>' : '') + '</div>' +
         '<span class="mc-arrow">→</span>' +
         (r && r.ImageUrl ? '<img alt="" src="' + esc(r.ImageUrl) + '">' : '<img alt="" style="visibility:hidden">') +
@@ -1672,12 +2270,30 @@
     loadSources().then(function () { renderPickers(); startBatchSearch(); });
   });
   $('#mcBatchSearch').addEventListener('click', startBatchSearch);
+  /** Search one row again (after "search failed", a rate limit or nothing found), with the chosen sources. */
+  function retryBatchRow(i) {
+    var b = batch[i];
+    if (!b) return;
+    var info = queryInfo(b.query, b.year);
+    b.results = null; b.checked = false; b.confident = false; b.manual = false; b.status = '…searching again';
+    renderBatch();
+    searchSources({ itemId: b.id, kind: batchType === 'series' ? 'series' : 'movie' }, info, chosenSources()).then(function (found) {
+      b.results = found.results;
+      var best = bestMatch(found.results, info.Name || b.query, b.year);
+      b.pick = best >= 0 ? best : 0;
+      b.checked = best >= 0;
+      b.status = found.results.length ? '✔ ' + countsText(found.counts) : 'No results again: ' + countsText(found.counts);
+      renderBatch();
+    }, function (e) { b.results = []; b.status = 'Retry failed: ' + (e && e.message || e); renderBatch(); });
+  }
 
   $('#mcBatchAll').addEventListener('change', function (e) {
     batch.forEach(function (b) { if (b.results && b.results[b.pick]) b.checked = e.target.checked; });
     renderBatch();
   });
   $('#mcBatchList').addEventListener('click', function (e) {
+    var again = e.target.closest('.mc-batch-retry');
+    if (again) { retryBatchRow(parseInt(again.getAttribute('data-i'), 10)); return; }
     var btn = e.target.closest('.mc-batch-manual');
     if (!btn) return;
     var i = parseInt(btn.getAttribute('data-i'), 10);
@@ -1813,13 +2429,37 @@
   });
   ['#mcTplFolder', '#mcTplFile', '#mcTplDisplay', '#mcTplSeries', '#mcTplSeason', '#mcTplEpisode', '#mcTplSeriesDisplay', '#mcRules']
     .forEach(function (s) { $(s).addEventListener('input', namingExample); });
-  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcEpisodes', '#mcFlatten', '#mcFlattenSeries'].forEach(function (s) { $(s).addEventListener('change', load); });
+  ['#mcRename', '#mcNfo', '#mcLockNfo', '#mcFlatten', '#mcFlattenSeries'].forEach(function (s) { $(s).addEventListener('change', load); });
 
   // ---------------------------------------------------------------- panel events
+  /** The page URL keeps the tab and the search: "&tab=series&search=umaru" (reload / bookmark come back to it). */
+  function urlParams() {
+    var h = location.hash, q = h.indexOf('?');
+    var ps = new URLSearchParams(q >= 0 ? h.slice(q + 1) : '');
+    var outer = new URLSearchParams(location.search || '');
+    ['tab', 'search'].forEach(function (k) { if (!ps.has(k) && outer.has(k)) ps.set(k, outer.get(k)); });
+    try { // the router can drop extra params when it opens the page: the last tab / search of this browser tab
+      if (!ps.has('tab') && sessionStorage.getItem('mcTab')) ps.set('tab', sessionStorage.getItem('mcTab'));
+      if (!ps.has('search') && sessionStorage.getItem('mcSearch')) ps.set('search', sessionStorage.getItem('mcSearch'));
+    } catch (e) { /* no storage */ }
+    return ps;
+  }
+  function saveUrl() {
+    try {
+      // Jellyfin's own part ("name=Movie%20Curator") stays exactly as it is; only tab / search are replaced
+      var h = location.hash, q = h.indexOf('?'), s = $('#mcFilter').value.trim();
+      try { sessionStorage.setItem('mcTab', type); sessionStorage.setItem('mcSearch', s); } catch (e2) { /* no storage */ }
+      var keep = (q >= 0 ? h.slice(q + 1).split('&') : []).filter(function (x) { return x && !/^(tab|search)=/.test(x); });
+      keep.push('tab=' + type);
+      if (s) keep.push('search=' + encodeURIComponent(s));
+      history.replaceState(history.state, '', location.pathname + location.search + (q >= 0 ? h.slice(0, q) : h) + '?' + keep.join('&'));
+    } catch (e) { /* URL not updated: fine */ }
+  }
   function setType(t) {
     if (type === t) return;
     type = t;
-    selected = {}; open = {};
+    saveUrl();
+    selected = {}; open = {}; pickedLines = {}; lineBar();
     $('#mcTabMovies').classList.toggle('button-submit', type === 'movies');
     $('#mcTabSeries').classList.toggle('button-submit', type === 'series');
     syncTypeVisibility();
@@ -1832,10 +2472,10 @@
   var searchTimer = null;
   $('#mcFilter').addEventListener('input', function (e) {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(render, e.target.value ? 350 : 0);
+    searchTimer = setTimeout(function () { render(); saveUrl(); }, e.target.value ? 350 : 0);
   });
   $('#mcFilter').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { clearTimeout(searchTimer); render(); }
+    if (e.key === 'Enter') { clearTimeout(searchTimer); render(); saveUrl(); }
   });
   $('#mcRefresh').addEventListener('click', load);
   $('#mcSelectAllBox').addEventListener('change', function (e) {
@@ -1880,13 +2520,7 @@
   $('#mcCombine').addEventListener('click', function () {
     var rows = selectedIds().map(planById);
     if (collectionMode()) {
-      if (!rows.length) return;
-      var name = prompt('Collection name (an existing collection with this name gets these added):',
-        commonTitle(rows.map(function (p) { return p.jellyfinName; })));
-      if (!name || !name.trim()) return;
-      api('POST', 'Collections', { name: name.trim(), itemIds: rows.map(function (p) { return p.itemId; }) })
-        .then(function () { Dashboard.alert('Added ' + noun(rows.length) + ' to the collection "' + name.trim() + '".'); selected = {}; return reloadRows(rows.map(function (r) { return r.itemId; })); })
-        .catch(function (e) { Dashboard.alert('Could not add to the collection: ' + e.message); });
+      if (rows.length) openCollBatch(rows);
       return;
     }
     if (rows.length < 2) return;
@@ -1934,24 +2568,6 @@
   var PLACE_NOTES = ['flatten', 'if empty after flatten', 'group with', 'to Specials', 'to Movies library', 'extras', 'merged into extras', 'to curator trash', 'empty show', 'to trash'];
   function placeOp(o) { return PLACE_NOTES.indexOf(o.note) >= 0; }
   $('#mcMoveFolders').addEventListener('click', function () { applyFolders('move'); });
-  $('#mcGroupNew').addEventListener('click', function () {
-    var rows = selectedIds().map(planById).filter(function (p) { return p.treeRoot && p.root; });
-    if (!rows.length) return;
-    var name = prompt('Name of the new folder (the ' + noun(rows.length) + ' move into it on 📁 Move folders):',
-      commonTitle(rows.map(function (p) { return p.jellyfinName; })));
-    name = (name || '').replace(/[\/\\]/g, '-').replace(/[:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
-    if (!name) return;
-    var target = rows[0].root + '/' + name;
-    if (rows.some(function (p) { return p.treeRoot === target; })) { Dashboard.alert('One of the selected shows already is that folder: pick another name.'); return; }
-    rows.reduce(function (chain, p) {
-      return chain.then(function () { return api('POST', 'FolderRule', { path: p.treeRoot, action: 'into', target: target, title: p.jellyfinName }); });
-    }, Promise.resolve()).then(function () {
-      selected = {};
-      return reloadRows(rows.map(function (r) { return r.itemId; }));
-    }).then(function () {
-      Dashboard.alert(noun(rows.length) + ' will move into "' + name + '/" on 📁 Move folders (select them and press it). Undo: 🕘 History.');
-    }).catch(function (e) { Dashboard.alert('Could not plan it: ' + e.message); load(); });
-  });
   $('#mcRenameFiles').addEventListener('click', function () { applyFolders('rename'); });
   function applyFolders(mode) {
     var test = mode === 'move' ? placeOp : function (o) { return !placeOp(o) && o.kind !== 'mkdir'; };
@@ -2105,6 +2721,12 @@
     if (!rowEl) return;
     var id = rowEl.getAttribute('data-id'), p = planById(id);
     if (e.target.closest('.mc-root-files') && p) { openFolder(p.treeRoot, id); return; }
+    if (e.target.closest('.mc-root-split') && p) {
+      if (!rowSplit(p) && !confirm('Split "' + p.treeRoot.split('/').pop() + '" into separate shows?\n\nOn 📁 Move folders each subfolder moves to the library root as a show of its own ' +
+          '(named by its title), and the empty folder goes. Then identify each and put them in one collection. Undo: 🕘 History.')) return;
+      saveNode({ path: p.treeRoot, action: rowSplit(p) ? 'auto' : 'split' }).then(render);
+      return;
+    }
     if (e.target.closest('.mc-row-play') && p) { playHere(p.itemId); return; }
     if (e.target.closest('.mc-notes-tag')) { notesOpen[id] = !notesOpen[id]; renderRow(id); return; }
     var cx = e.target.closest('.mc-coll-x');
@@ -2128,30 +2750,63 @@
     if (e.target.closest('.mc-node-reset')) { saveNode({ path: n.path, action: 'auto' }); return; }
     var play = e.target.closest('.mc-node-play');
     if (play) { playHere(play.getAttribute('data-item')); return; }
-    var b = e.target.closest('.mc-node-btn');
-    if (!b) return;
-    var act = b.getAttribute('data-act');
-    if (act === 'stay') act = n.kind === 'file' ? 'leave' : 'stay';
-    saveNode({ path: n.path, action: act, season: act === 'stay' ? n.season : null, episode: n.episode, title: act === 'stay' ? n.title : null });
+    if (e.target.closest('.mc-node-exec')) {
+      var c = lineChoice[n.path];
+      if (c === '@rename') runLines([n.path], [n.id], 'rename');
+      else if (c === '@identify') identifyLine(n.path, n.id);
+      else if (c === '@seasonname') identifySeasonName(n.path, n.id, n.season);
+      else runLines([n.path], [n.id]);
+      return;
+    }
   });
   $('#mcList').addEventListener('change', function (e) {
     var rowEl = e.target.closest('.mc-row');
     if (!rowEl) return;
     var p = planById(rowEl.getAttribute('data-id'));
-    if (e.target.classList.contains('mc-root-into') && p) {
-      saveNode(e.target.value ? { path: p.treeRoot, action: 'into', target: e.target.value, title: p.jellyfinName } : { path: p.treeRoot, action: 'auto' });
+    if (e.target.classList.contains('mc-root-coll') && p) {
+      var name = e.target.value;
+      if (name === '+') name = (prompt('New collection name:', p.jellyfinName) || '').trim();
+      e.target.value = '';
+      if (!name) return;
+      var ids = (p.members && p.members.length ? p.members.map(function (m) { return m.itemId; }) : []).concat([p.itemId]);
+      api('POST', 'Collections', { name: name, itemIds: ids })
+        .then(function () { return reloadRows([p.itemId]); }).then(loadCollections).then(render)
+        .catch(function (err) { Dashboard.alert('Could not add it: ' + err.message); });
       return;
     }
     var n = nodeOf(e.target);
     if (!n) return;
-    if (e.target.classList.contains('mc-node-into')) {
-      saveNode(e.target.value ? { path: n.path, action: 'into', target: e.target.value, episode: n.episode } : { path: n.path, action: 'auto' });
+    if (e.target.classList.contains('mc-node-sel')) {
+      var lineEl = e.target.closest('.mc-node');
+      if (e.target.checked) {
+        pickedLines[n.path] = { row: n.id, kind: n.kind, depth: parseInt(lineEl.getAttribute('data-depth'), 10) || 1, series: p && p.kind === 'series' };
+      } else delete pickedLines[n.path];
+      lineEl.classList.toggle('mc-node-picked', e.target.checked);
+      lineBar();
+      return;
+    }
+    if (e.target.classList.contains('mc-node-act')) {
+      var v = e.target.value;
+      delete lineChoice[n.path]; delete pendingInto[n.path];
+      if (v.charAt(0) === '@') { lineChoice[n.path] = v; renderRow(n.id); return; } // run by ▶ Execute
+      if (v === 'into') { pendingInto[n.path] = true; renderRow(n.id); return; }   // pick the show next
+      if (v === 'newshow') {
+        var row0 = planById(n.id), name0 = askNewShow([n.path]);
+        if (!name0 || !row0 || !row0.root) { renderRow(n.id); return; }
+        saveNode({ path: n.path, action: 'newshow', target: row0.root + '/' + name0, episode: n.episode });
+        return;
+      }
+      if (v === 'stay') saveNode({ path: n.path, action: n.kind === 'file' ? 'leave' : 'stay', season: n.season, title: n.title, episode: n.episode });
+      else saveNode({ path: n.path, action: v, episode: n.episode });
+    } else if (e.target.classList.contains('mc-node-into')) {
+      if (e.target.value) { delete pendingInto[n.path]; saveNode({ path: n.path, action: 'into', target: e.target.value, episode: n.episode }); }
     } else if (e.target.classList.contains('mc-node-season') || e.target.classList.contains('mc-node-title')) {
       saveNode({ path: n.path, action: 'stay', season: n.season, title: n.title });
     } else if (e.target.classList.contains('mc-node-ep')) {
-      var cur = e.target.closest('.mc-node').querySelector('.mc-node-btn.on');
-      var act = cur ? cur.getAttribute('data-act') : 'leave';
-      saveNode({ path: n.path, action: act === 'stay' ? 'leave' : act, episode: n.episode });
+      var line = e.target.closest('.mc-node'), sel = line.querySelector('.mc-node-act'), into = line.querySelector('.mc-node-into');
+      var act = sel && sel.value.charAt(0) !== '@' ? sel.value : 'stay';
+      saveNode(act === 'into' && into && into.value ? { path: n.path, action: 'into', target: into.value, episode: n.episode }
+        : { path: n.path, action: act === 'stay' || act === 'into' ? 'leave' : act, episode: n.episode });
     }
   });
 
@@ -2267,6 +2922,11 @@
     pollJobs(); // re-attach: show jobs that kept running while the page was closed
     loadLayout();
     renderFilterMenu();
+    // &tab= / &search= from the URL
+    var ps = urlParams(), wantTab = ps.get('tab');
+    if (ps.has('search')) $('#mcFilter').value = ps.get('search');
+    if ((wantTab === 'movies' || wantTab === 'series') && wantTab !== type) { setType(wantTab); return; } // loads the tab
+    saveUrl();
     load();
   });
   window.addEventListener('resize', function () { stickyOffset(); fitToContent(); });

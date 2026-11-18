@@ -75,6 +75,23 @@ public class SeasonNameRequest
     [JsonPropertyName("name")] public string? Name { get; set; }
 }
 
+public class CollectionListItem
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("count")] public int Count { get; set; }
+}
+
+public class CollectionImageRequest
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+
+    /// <summary>The show / movie whose poster (and backdrop) the collection gets.</summary>
+    [JsonPropertyName("fromItemId")] public string FromItemId { get; set; } = string.Empty;
+}
+
 public class CollectionRemoveRequest
 {
     [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
@@ -243,6 +260,55 @@ public class CuratorController : ControllerBase
     /// Group shows (e.g. the seasons of one franchise in the flat layout) or movies into a Jellyfin collection.
     /// An existing collection with that name is reused. Returns the collection's id.
     /// </summary>
+    /// <summary>Give a collection the poster (and backdrop) of one of its shows / movies.</summary>
+    /// <summary>Every collection in Jellyfin (movies and shows alike): name and how many items it holds.</summary>
+    [HttpGet("Collections")]
+    public ActionResult<List<CollectionListItem>> ListCollections()
+        => _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true })
+            .OfType<BoxSet>()
+            .Select(b => new CollectionListItem { Name = b.Name ?? string.Empty, Id = b.Id.ToString("N"), Count = b.GetLinkedChildren().Count() })
+            .Where(c => c.Name.Length > 0)
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    [HttpPost("Collections/Image")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<ActionResult> SetCollectionImage([FromBody] CollectionImageRequest request)
+    {
+        var box = _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true })
+            .OfType<BoxSet>()
+            .FirstOrDefault(b => string.Equals(b.Name, request.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (box == null || !Guid.TryParse(request.FromItemId, out var fromId) || _library.GetItemById(fromId) is not { } from)
+        {
+            return NotFound();
+        }
+
+        var copied = 0;
+        foreach (var type in new[] { MediaBrowser.Model.Entities.ImageType.Primary, MediaBrowser.Model.Entities.ImageType.Backdrop })
+        {
+            var image = from.GetImageInfo(type, 0);
+            if (image == null || !image.IsLocalFile || !System.IO.File.Exists(image.Path))
+            {
+                continue;
+            }
+
+            var ext = System.IO.Path.GetExtension(image.Path).ToLowerInvariant();
+            var mime = ext is ".png" ? "image/png" : ext is ".webp" ? "image/webp" : "image/jpeg";
+            await using var stream = System.IO.File.OpenRead(image.Path);
+            await _providers.SaveImage(box, stream, mime, type, null, HttpContext.RequestAborted).ConfigureAwait(false);
+            copied++;
+        }
+
+        if (copied == 0)
+        {
+            return BadRequest("That item has no local poster to copy (refresh its images first).");
+        }
+
+        await box.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, HttpContext.RequestAborted).ConfigureAwait(false);
+        _logger.LogInformation("Curator: collection {Name} got the images of {From}", box.Name, from.Name);
+        return NoContent();
+    }
+
     [HttpPost("Collections/Remove")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<ActionResult> RemoveFromCollection([FromBody] CollectionRemoveRequest request)

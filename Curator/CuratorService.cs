@@ -48,6 +48,9 @@ public class PlanOptions
     /// <summary>Plan only these items (comma-separated ids; a show brings its combined folders): refreshing one row.</summary>
     [JsonPropertyName("ids")] public string? Ids { get; set; }
 
+    /// <summary>Run only the actions of these lines (folder / file paths): "▶ Execute" / "Apply actions".</summary>
+    [JsonPropertyName("paths")] public List<string>? Paths { get; set; }
+
     internal HashSet<Guid>? OnlyIds => string.IsNullOrWhiteSpace(Ids) ? null
         : Ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToHashSet();
@@ -57,6 +60,9 @@ public class PlanOptions
 
 public class PlanOp
 {
+    /// <summary>The folder / file whose action caused this change (a line in the tree): lets one line run on its own.</summary>
+    [JsonPropertyName("source")] public string? Source { get; set; }
+
     /// <summary>mkdir | move | dirmove | rmdir | nfo | display</summary>
     [JsonPropertyName("kind")] public string Kind { get; set; } = string.Empty;
 
@@ -80,6 +86,9 @@ public class ItemPlan
 
     /// <summary>Names of the Jellyfin collections (box sets) this item is in.</summary>
     [JsonPropertyName("collections")] public List<string> Collections { get; set; } = new();
+
+    /// <summary>Collection name -> its Jellyfin id and whether it has a poster (for the collection frame).</summary>
+    [JsonPropertyName("collectionInfo")] public Dictionary<string, CollectionInfo> CollectionInfo { get; set; } = new();
 
     /// <summary>Movie: video file. Series: series folder.</summary>
     [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
@@ -163,6 +172,9 @@ public class ItemPlan
 
     /// <summary>Series: no episode files at all (a leftover folder); its plan clears it out.</summary>
     [JsonPropertyName("empty")] public bool Empty { get; set; }
+
+    /// <summary>Series: this folder is a group folder (the curator's index of shows grouped together).</summary>
+    [JsonPropertyName("groupFolder")] public bool GroupFolder { get; set; }
 
     /// <summary>Series: this folder only holds other shows (e.g. "Fate Series/Fate Zero/…"); their folder names.</summary>
     [JsonPropertyName("containerShows")] public List<string> ContainerShows { get; set; } = new();
@@ -252,6 +264,13 @@ public class SeasonFolderInfo
 }
 
 /// <summary>A video directly in a series folder that Jellyfin couldn't number (often a movie or special).</summary>
+public class CollectionInfo
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("hasImage")] public bool HasImage { get; set; }
+}
+
 /// <summary>A folder in an item's folder tree, with what happens to it.</summary>
 public class TreeNode
 {
@@ -303,6 +322,9 @@ public class FolderEntry
     [JsonPropertyName("episodeSource")] public string EpisodeSource { get; set; } = "none";
 
     [JsonPropertyName("itemId")] public string? ItemId { get; set; }
+
+    /// <summary>Jellyfin item type of a video (Movie, Episode...).</summary>
+    [JsonPropertyName("itemType")] public string? ItemType { get; set; }
 }
 
 public class LooseVideoInfo
@@ -568,7 +590,7 @@ public class CuratorService
     {
         var kids = Directory.GetDirectories(dir)
             .Where(d => !IsJunk(d) && HasVideosBelow(d) && !ExtrasLike.IsMatch(System.IO.Path.GetFileName(d).Trim()))
-            .Where(d => FolderRuleFor(d) is not { } r || r.Action == "show") // you chose to keep it here (Stay, a season...)
+            .Where(d => (FolderRuleFor(d) is not { } r || r.Action == "show") && !KeptSeason(d)) // kept here (Stay, a season.nfo...)
             .OrderBy(d => d, StringComparer.Ordinal)
             .ToList();
         if (kids.Count < 2)
@@ -927,6 +949,9 @@ public class CuratorService
 
         public bool IsTaken(string p) => Taken.Contains(p) || File.Exists(p) || Directory.Exists(p);
 
+        /// <summary>The line (folder / file) being planned: stamped on the changes it causes.</summary>
+        public string? Source { get; set; }
+
         /// <summary>Episode numbers read from file names, for episodes Jellyfin couldn't number (path -> number).</summary>
         public Dictionary<string, int> EpNo { get; } = new(StringComparer.Ordinal);
     }
@@ -936,6 +961,8 @@ public class CuratorService
         FolderRuleFor(e.Path ?? string.Empty)?.Episode
         ?? e.IndexNumber
         ?? (ctx.EpNo.TryGetValue(e.Path ?? string.Empty, out var n) ? n : null);
+
+    private static readonly Regex TrailingEpisode = new(@"(?:^|\s)-\s*(?<n>\d{1,4})(?:v\d)?$", RegexOptions.IgnoreCase);
 
     private static readonly Regex EpMarker = new(
         @"\bS\d{1,2}\s*E(?<n>\d{1,4})(?!\d)|\bEp?(?:isode)?\.?\s*(?<n>\d{1,4})(?!\d)|#(?<n>\d{1,4})(?!\d)"
@@ -968,6 +995,15 @@ public class CuratorService
             var parsed = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var e in folder.Where(e => e.IndexNumber == null))
             {
+                // "<title> - 01" / "<title> - 01v2" at the very end: that number is the episode (the clearest pattern, so first)
+                var tail = TrailingEpisode.Match(clean[e.Path!]);
+                if (tail.Success && int.TryParse(tail.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var tn) && tn > 0
+                    && !(tail.Groups["n"].Value.Length == 4 && tn is >= 1900 and <= 2099))
+                {
+                    parsed[e.Path!] = tn;
+                    continue;
+                }
+
                 var rest = clean[e.Path!];
                 rest = rest.Length > prefix.Length ? rest.Substring(prefix.Length) : rest;
                 var m = EpMarker.Match(rest);
@@ -1052,7 +1088,7 @@ public class CuratorService
         }
 
         ctx.Taken.Add(dst);
-        p.Ops.Add(new PlanOp { Kind = kind, From = src, To = dst, Note = note });
+        p.Ops.Add(new PlanOp { Kind = kind, From = src, To = dst, Note = note, Source = ctx.Source });
         return true;
     }
 
@@ -1074,7 +1110,7 @@ public class CuratorService
     {
         if (!Directory.Exists(dir) && ctx.Taken.Add(dir))
         {
-            p.Ops.Add(new PlanOp { Kind = "mkdir", To = dir });
+            p.Ops.Add(new PlanOp { Kind = "mkdir", To = dir, Source = ctx.Source });
         }
     }
 
@@ -1089,6 +1125,14 @@ public class CuratorService
 
     public List<ItemPlan> BuildPlan(PlanOptions opt)
     {
+        // a show folder "moved into another show" was the old way of grouping (now: collections); such leftover choices
+        // would move a show folder back inside another one, so they go
+        var roots = LibraryRoots();
+        if (Config.FolderRules.RemoveAll(r => r.Action == "into" && roots.Contains(System.IO.Path.GetDirectoryName(r.Path) ?? string.Empty)) > 0)
+        {
+            Plugin.Instance!.SaveConfiguration();
+        }
+
         var plans = BuildPlanCore(opt);
         AttachCollections(plans);
         return plans;
@@ -1098,11 +1142,13 @@ public class CuratorService
     private void AttachCollections(List<ItemPlan> plans)
     {
         var map = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var info = new Dictionary<string, CollectionInfo>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var boxes = _library.GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.BoxSet }, Recursive = true }).OfType<BoxSet>();
             foreach (var box in boxes)
             {
+                info[box.Name ?? string.Empty] = new CollectionInfo { Id = box.Id.ToString("N"), HasImage = box.HasImage(ImageType.Primary) };
                 foreach (var child in box.GetLinkedChildren())
                 {
                     var key = child.Id.ToString("N");
@@ -1133,6 +1179,7 @@ public class CuratorService
             }
 
             p.Collections = names.Where(x => x.Length > 0).ToList();
+            p.CollectionInfo = p.Collections.Where(info.ContainsKey).ToDictionary(c => c, c => info[c]);
         }
     }
 
@@ -1148,7 +1195,7 @@ public class CuratorService
     private static readonly HashSet<string> PlaceNotes = new(StringComparer.Ordinal)
     {
         "flatten", "if empty after flatten", "group with", "to Specials", "to Movies library", "extras", "merged into extras",
-        "to curator trash", "empty show", "to trash",
+        "to curator trash", "empty show", "to trash", "group folder", "split", "new show",
     };
 
     private List<ItemPlan> BuildPlanCore(PlanOptions opt)
@@ -1166,6 +1213,13 @@ public class CuratorService
             foreach (var p in list)
             {
                 p.Ops = move ? p.Ops.Where(x => x.Kind is not ("nfo" or "display")).ToList() : RenameOnly(p.Ops);
+                if (opt.Paths is { Count: > 0 } lines)
+                {
+                    // "▶ Execute" / "Apply actions": only the changes those lines cause
+                    var set = lines.Select(l => l.TrimEnd('/')).ToHashSet(StringComparer.Ordinal);
+                    p.Ops = p.Ops.Where(x => x.Source != null
+                        && (set.Contains(x.Source) || (!move && set.Any(l => IsUnder(x.Source, l))))).ToList();
+                }
             }
 
             return list;
@@ -1279,6 +1333,7 @@ public class CuratorService
 
         // "delete": the movie's folder (or the file with its sidecars) goes to the trash next to the library
         var trashPath = layout == "single" ? dir : m.Path;
+        ctx.Source = trashPath;
         if (FolderRuleFor(trashPath)?.Action == "trash" && root.Length > 0)
         {
             var bin = TrashFor(trashPath, root);
@@ -1300,6 +1355,8 @@ public class CuratorService
             return p;
         }
 
+        ctx.Source = null;
+
         // 0. display title shown in Jellyfin
         AddDisplayOp(p, m, names.Display);
 
@@ -1310,7 +1367,7 @@ public class CuratorService
         {
             target = dir;
             var parent = System.IO.Path.GetDirectoryName(dir)!;
-            var newParent = opt.Flatten && root.Length > 0 && parent != root ? root : parent;
+            var newParent = opt.Flatten && root.Length > 0 && parent != root && !IsGroupFolder(parent) ? root : parent;
             flattenFrom = newParent != parent ? parent : null;
             final = opt.Rename || flattenFrom != null
                 ? System.IO.Path.Combine(newParent, opt.Rename ? title : System.IO.Path.GetFileName(dir))
@@ -1381,7 +1438,7 @@ public class CuratorService
         // 4b. the collection folder goes once it's empty (checked when applying, so the last movie out removes it)
         if (flattenFrom != null)
         {
-            p.Ops.Add(new PlanOp { Kind = "rmdir", To = flattenFrom, Note = "if empty after flatten" });
+            p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = flattenFrom, Note = "if empty after flatten" });
         }
 
         p.FinalPath = System.IO.Path.Combine(final, newStem + System.IO.Path.GetExtension(m.Path));
@@ -1669,6 +1726,19 @@ public class CuratorService
         p.TreeRoot = dir;
 
         // "delete": the whole show folder goes to the trash next to the library (nothing else changes this run)
+        ctx.Source = dir;
+        // "split into shows": every season folder becomes a show of its own at the library root (grouping = a collection)
+        if (FolderRuleFor(dir)?.Action == "split")
+        {
+            PlanSplit(p, ctx, dir);
+            return p;
+        }
+
+        if (IsGroupFolder(dir))
+        {
+            PlanGroupFolder(p, ctx, dir); // the group folder has no NFO / artwork of its own; its seasons carry theirs
+        }
+
         if (FolderRuleFor(dir)?.Action == "trash")
         {
             var bin = TrashFor(dir, System.IO.Path.GetDirectoryName(dir)!);
@@ -1679,17 +1749,8 @@ public class CuratorService
             return p;
         }
 
-        // "group with": the whole show folder moves into another show's folder (nothing else changes this run)
-        if (FolderRuleFor(dir) is { Action: "into", Target: { } intoDir } && NewOrExistingDir(intoDir) && !IsUnder(intoDir, dir))
-        {
-            var grouped = System.IO.Path.Combine(intoDir, System.IO.Path.GetFileName(dir));
-            MkDirs(p, ctx, intoDir); // "group into new folder": created here (logged, so undo removes it)
-            Move(p, ctx, dir, grouped, "dirmove", "group with");
-            p.FinalPath = grouped;
-            p.Warnings.Add($"Moves into {System.IO.Path.GetFileName(intoDir)}/ (group with). After the scan it shows up there as a subfolder.");
-            p.Tree = BuildTree(dir, 1, null);
-            return p;
-        }
+
+        ctx.Source = null;
 
         // empty show (no episode files, no videos at all): clear the leftover folder out. Its files (artwork, NFO)
         // go to the curator's trash folder - logged like every change, so Undo / Rewind brings them back.
@@ -1706,10 +1767,10 @@ public class CuratorService
 
             foreach (var sub in Directory.GetDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
             {
-                p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "empty show" });
+                p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = sub, Note = "empty show" });
             }
 
-            p.Ops.Add(new PlanOp { Kind = "rmdir", To = dir, Note = "empty show" });
+            p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = dir, Note = "empty show" });
             p.Warnings.Add("No episode files in this folder: it gets removed (leftover artwork / NFO go to the curator's trash; Undo brings them back).");
             return p;
         }
@@ -1727,11 +1788,12 @@ public class CuratorService
                 var parentDir = System.IO.Path.GetDirectoryName(dir)!;
                 foreach (var kid in kids)
                 {
+                    ctx.Source = kid;
                     var name = FlattenName(System.IO.Path.GetFileName(dir), System.IO.Path.GetFileName(kid));
                     Move(p, ctx, kid, System.IO.Path.Combine(parentDir, name), "dirmove", "flatten");
                 }
 
-                p.Ops.Add(new PlanOp { Kind = "rmdir", To = dir, Note = "if empty after flatten" });
+                p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = dir, Note = "if empty after flatten" });
                 var leftovers = Directory.GetFiles(dir).Where(f => !IsJunk(f)).Select(System.IO.Path.GetFileName).ToList();
                 if (leftovers.Count > 0)
                 {
@@ -1773,16 +1835,17 @@ public class CuratorService
             });
             foreach (var sub in subs)
             {
+                ctx.Source = sub;
                 var inSub = rawEps.Where(e => IsUnder(e.Path, sub)).ToList();
                 var fs = FolderSeason(sub, inSub);
                 var rule = FolderRuleFor(sub);
                 var subName = System.IO.Path.GetFileName(sub).Trim();
-                var action = rule?.Action is "show" or "movies" or "extras" or "episode" or "into" ? rule.Action
+                var action = rule?.Action is "show" or "movies" or "extras" or "episode" or "into" or "newshow" or "trash" ? rule.Action
                     : rule != null ? "season"
                     : ExtrasLike.IsMatch(subName) || JellyfinExtras.ContainsKey(subName) ? "extras"
                     : VideoCount(sub) == 1 && MovieLike.IsMatch(subName) ? "movies"
                     : VideoCount(sub) == 1 && episodeFolderCount >= 2 ? "episode"
-                    : Flat && !ExtrasLike.IsMatch(subName) && VideoCount(sub) >= 2 ? "show"
+                    : Flat && !ExtrasLike.IsMatch(subName) && VideoCount(sub) >= 2 && !KeptSeason(sub) ? "show"
                     : "season";
                 subSeasons[sub] = fs;
                 p.SeasonFolders.Add(new SeasonFolderInfo
@@ -1793,9 +1856,9 @@ public class CuratorService
                     SeasonSource = fs.Source,
                     Action = action,
                 });
-                if (action == "into")
+                if (action is "into" or "newshow" or "trash")
                 {
-                    // "group with": moved by ApplyManualRules below
+                    // moved by ApplyManualRules below
                 }
                 else if (action == "show")
                 {
@@ -1821,10 +1884,10 @@ public class CuratorService
 
                     foreach (var d in Directory.GetDirectories(sub, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
                     {
-                        p.Ops.Add(new PlanOp { Kind = "rmdir", To = d, Note = "if empty after flatten" });
+                        p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = d, Note = "if empty after flatten" });
                     }
 
-                    p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "if empty after flatten" });
+                    p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = sub, Note = "if empty after flatten" });
                 }
                 else if (action == "extras")
                 {
@@ -1857,10 +1920,10 @@ public class CuratorService
 
                             foreach (var d in Directory.GetDirectories(sub, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
                             {
-                                p.Ops.Add(new PlanOp { Kind = "rmdir", To = d, Note = "merged into extras" });
+                                p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = d, Note = "merged into extras" });
                             }
 
-                            p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "merged into extras" });
+                            p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = sub, Note = "merged into extras" });
                         }
                     }
                 }
@@ -1880,6 +1943,7 @@ public class CuratorService
             // soundtracks, scans, fonts...: no videos, so not in the panel; with a Specials folder they leave the library too
             if (SpecialsRoot is { } bonusRoot)
             {
+                ctx.Source = null;
                 foreach (var d in Directory.GetDirectories(mDir).Where(d => !IsJunk(d) && !HasVideosBelow(d)
                     && BonusNoVideo.IsMatch(System.IO.Path.GetFileName(d).Trim())).OrderBy(d => d, StringComparer.Ordinal))
                 {
@@ -1890,6 +1954,7 @@ public class CuratorService
                         continue;
                     }
 
+                    ctx.Source = d;
                     MkDirs(p, ctx, System.IO.Path.GetDirectoryName(dst)!);
                     Move(p, ctx, d, dst, "dirmove", "to Specials");
                 }
@@ -1907,6 +1972,7 @@ public class CuratorService
             var singleVideo = VideoCount(mDir) == 1;
             foreach (var e in rawEps.Where(e => System.IO.Path.GetDirectoryName(e.Path) == mDir && (singleVideo || EpNumber(ctx, e) == null)))
             {
+                ctx.Source = e.Path;
                 var action = FolderRuleFor(e.Path)?.Action == "movies" ? "movies" : "leave";
                 p.LooseVideos.Add(new LooseVideoInfo { Path = e.Path, Action = action });
                 if (action == "movies" && moviesRoot != null)
@@ -1926,11 +1992,14 @@ public class CuratorService
                 }
             }
 
+            ctx.Source = null;
+
             // moves chosen per folder / file at any depth (first-level folders' other actions are handled above)
             var memberDir = mDir;
             ApplyManualRules(p, ctx, mDir, System.IO.Path.GetFileName(string.IsNullOrEmpty(p.FinalPath) ? mDir : p.FinalPath),
                 System.IO.Path.GetDirectoryName(dir)!, moviesRoot, excludedDirs, excludedFiles,
-                path => Directory.Exists(path) && System.IO.Path.GetDirectoryName(path) == memberDir && FolderRuleFor(path)?.Action != "into");
+                path => Directory.Exists(path) && System.IO.Path.GetDirectoryName(path) == memberDir
+                    && FolderRuleFor(path)?.Action is not ("into" or "newshow" or "trash"));
 
             var eps = rawEps
                 .Where(e => !excludedFiles.Contains(e.Path) && !excludedDirs.Any(d => IsUnder(e.Path, d)))
@@ -2052,10 +2121,13 @@ public class CuratorService
         var destDirs = new HashSet<string>(StringComparer.Ordinal);
         // season folders with their own title (grouped show): renamed in place to the title, episodes "<title> - 01"
         var titled = new Dictionary<string, (string Title, int Season)>(StringComparer.Ordinal);
+        var pendingNfos = new List<PlanOp>();
+        var claimedSubs = new HashSet<string>(StringComparer.Ordinal);
         var grouped = GroupedShow(dir);
 
         foreach (var (srcDir, e, season) in numbered)
         {
+            ctx.Source = e.Path;
             var number = EpNumber(ctx, e)!.Value;
             var end = e.IndexNumberEnd is int x && x > number ? x : (int?)null;
             var tokens = ItemTokens(s);
@@ -2086,7 +2158,7 @@ public class CuratorService
             // grouped show: every season folder you kept has a title - yours, else its current folder name (never "Season N")
             var own = top == null ? null
                 : FolderRuleFor(top)?.Title is { Length: > 0 } typed ? typed
-                : grouped && FolderRuleFor(top)?.Action == "season" ? OrderPrefix.Replace(System.IO.Path.GetFileName(top), string.Empty).Trim()
+                : grouped && KeptSeason(top) ? OldShowTitle(top) ?? OrderPrefix.Replace(System.IO.Path.GetFileName(top), string.Empty).Trim()
                 : null;
             if (seasonFolders && top != null && !string.IsNullOrEmpty(own))
             {
@@ -2105,8 +2177,20 @@ public class CuratorService
             }
 
             var oldDir = System.IO.Path.GetDirectoryName(e.Path)!;
+            // Jellyfin couldn't read this episode's number (or read another): tell it with an episode NFO next to the video
+            var nfoAt = System.IO.Path.Combine(seasonDir, newStem + ".nfo");
+            if (renameFiles && (e.IndexNumber != number || (e.ParentIndexNumber ?? season) != season)
+                && !File.Exists(System.IO.Path.Combine(oldDir, stem + ".nfo")) && !File.Exists(nfoAt) && !ctx.Taken.Contains(nfoAt))
+            {
+                ctx.Taken.Add(nfoAt);
+                // written after the video's own move below (nfo ops run in order)
+                pendingNfos.Add(new PlanOp { Kind = "nfo", To = nfoAt, Note = $"S{season}E{number}", Content = EpisodeNfo(season, number, end), Source = e.Path });
+            }
+
             if (oldDir == seasonDir && stem == newStem)
             {
+                p.Ops.AddRange(pendingNfos);
+                pendingNfos.Clear();
                 continue; // already tidy
             }
 
@@ -2121,7 +2205,35 @@ public class CuratorService
                     moved.Add(f);
                 }
             }
+
+            // subtitles named after another release ("…H.264-EniaHD.ass" next to "…HEVC-TEPES.mkv"): matched by the
+            // episode number, only when exactly one video in that folder has it; their language tag (.sc / .en) stays
+            var sameNumber = numbered.Count(x => System.IO.Path.GetDirectoryName(x.Episode.Path) == oldDir && EpNumber(ctx, x.Episode) == number && x.Season == season);
+            if (sameNumber == 1)
+            {
+                foreach (var sub in Directory.GetFiles(oldDir).Where(f => SubExt.Contains(System.IO.Path.GetExtension(f)) && !IsJunk(f)
+                    && !files.Contains(f) && !claimedSubs.Contains(f) && !moved.Contains(f)).OrderBy(f => f, StringComparer.Ordinal))
+                {
+                    var (subSeason, subEpisode) = SubtitleEpisode(sub);
+                    if (subEpisode != number || (subSeason is int ss && ss != season))
+                    {
+                        continue;
+                    }
+
+                    claimedSubs.Add(sub);
+                    var dst = System.IO.Path.Combine(seasonDir, newStem + SubtitleTag(sub) + System.IO.Path.GetExtension(sub));
+                    if (Move(p, ctx, sub, dst, "move", "subtitle by episode number"))
+                    {
+                        moved.Add(sub);
+                    }
+                }
+            }
+
+            p.Ops.AddRange(pendingNfos);
+            pendingNfos.Clear();
         }
+
+        ctx.Source = null;
 
         // folders that end up completely empty are removed, including merged series folders (undo recreates them)
         foreach (var src in sources)
@@ -2138,7 +2250,7 @@ public class CuratorService
                 var leftovers = Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories).Where(f => !moved.Contains(f));
                 if (!isDestination && !leftovers.Any() && !ctx.Taken.Contains(sub))
                 {
-                    p.Ops.Add(new PlanOp { Kind = "rmdir", To = sub, Note = "empty after moves" });
+                    p.Ops.Add(new PlanOp { Source = ctx.Source, Kind = "rmdir", To = sub, Note = "empty after moves" });
                 }
             }
         }
@@ -2159,18 +2271,40 @@ public class CuratorService
             foreach (var (folder, info) in titled.OrderBy(k => k.Key, StringComparer.Ordinal))
             {
                 // "2. Himouto! Umaru-chan S": the leading number is the season Jellyfin reads (and sorts the folders on disk)
+                ctx.Source = folder;
+                var bin = System.IO.Path.Combine(TrashDir, $"{Safe(System.IO.Path.GetFileName(folder))}-{DateTime.UtcNow:yyyyMMddHHmmss}");
+                // its leftover tvshow.nfo (it used to be a show) would let Jellyfin take it for a separate show again
+                var oldShow = System.IO.Path.Combine(folder, "tvshow.nfo");
+                if (File.Exists(oldShow))
+                {
+                    MkDirs(p, ctx, bin);
+                    Move(p, ctx, oldShow, System.IO.Path.Combine(bin, "tvshow.nfo"), "move", "old show NFO");
+                }
+
+                // a season.nfo with another title is replaced (the old one goes to the trash too)
+                var oldSeason = System.IO.Path.Combine(folder, "season.nfo");
+                var writeSeason = !File.Exists(oldSeason);
+                if (!writeSeason && NfoTitle(oldSeason) != info.Title)
+                {
+                    MkDirs(p, ctx, bin);
+                    Move(p, ctx, oldSeason, System.IO.Path.Combine(bin, "season.nfo"), "move", "old season NFO");
+                    writeSeason = true;
+                }
+
                 var named = System.IO.Path.Combine(dir, Safe($"{info.Season}. {OrderPrefix.Replace(info.Title, string.Empty)}"));
                 if (named != folder)
                 {
                     Move(p, ctx, folder, named, "dirmove");
                 }
 
-                var nfo = System.IO.Path.Combine(named, "season.nfo");
-                if (!File.Exists(System.IO.Path.Combine(folder, "season.nfo")))
+                if (writeSeason)
                 {
-                    p.Ops.Add(new PlanOp { Kind = "nfo", To = nfo, Note = "season " + info.Season, Content = SeasonNfo(info.Title, info.Season) });
+                    var nfo = System.IO.Path.Combine(named, "season.nfo");
+                    p.Ops.Add(new PlanOp { Kind = "nfo", To = nfo, Note = "season " + info.Season, Content = SeasonNfo(info.Title, info.Season), Source = folder });
                 }
             }
+
+            ctx.Source = null;
         }
     }
 
@@ -2236,9 +2370,188 @@ public class CuratorService
         return System.IO.Path.Combine(drive, "_curator_trash", System.IO.Path.GetRelativePath(drive, path));
     }
 
+    /// <summary>A group folder (the curator's index): only groups shows / movies, no metadata of its own.</summary>
+    private static bool IsGroupFolder(string dir) => FolderRuleFor(dir)?.Action == "group";
+
+    private static readonly HashSet<string> MetaExt = new(StringComparer.OrdinalIgnoreCase) { ".nfo", ".jpg", ".jpeg", ".png", ".webp", ".svg", ".gif", ".tbn" };
+
+    /// <summary>
+    /// Group folder: its own NFO / artwork go to the curator's trash (Jellyfin must not see a show there), and each
+    /// subfolder becomes a show of its own: named by its title (yours, else its old show NFO's name, else the folder
+    /// name without a "1." order prefix - which Jellyfin would read as a season number), its season.nfo removed.
+    /// </summary>
+    private static void PlanGroupFolder(ItemPlan p, Ctx ctx, string dir)
+    {
+        p.GroupFolder = true;
+        var meta = Directory.GetFiles(dir).Where(f => !IsJunk(f) && MetaExt.Contains(System.IO.Path.GetExtension(f))).OrderBy(f => f, StringComparer.Ordinal).ToList();
+        if (meta.Count == 0)
+        {
+            return;
+        }
+
+        var bin = System.IO.Path.Combine(TrashDir, $"{Safe(System.IO.Path.GetFileName(dir))}-group-{DateTime.UtcNow:yyyyMMddHHmmss}");
+        MkDirs(p, ctx, bin);
+        foreach (var f in meta)
+        {
+            Move(p, ctx, f, System.IO.Path.Combine(bin, System.IO.Path.GetFileName(f)), "move", "group folder");
+        }
+    }
+
+    /// <summary>
+    /// Split a show into shows: each subfolder with videos moves to the library root, named by its title (yours, else its
+    /// old show NFO's name, else the folder name without a "1." prefix), its season.nfo to the trash; the parent's own
+    /// NFO / artwork go to the trash and the emptied parent folder is removed. Identify each afterwards.
+    /// </summary>
+    private static void PlanSplit(ItemPlan p, Ctx ctx, string dir)
+    {
+        var root = System.IO.Path.GetDirectoryName(dir)!;
+        var bin = System.IO.Path.Combine(TrashDir, $"{Safe(System.IO.Path.GetFileName(dir))}-split-{DateTime.UtcNow:yyyyMMddHHmmss}");
+        var children = Directory.GetDirectories(dir).Where(d => !IsJunk(d) && HasVideosBelow(d)).OrderBy(d => d, StringComparer.Ordinal).ToList();
+        var titles = children.ToDictionary(c => c, c => Safe(FolderRuleFor(c)?.Title is { Length: > 0 } typed ? typed
+            : OldShowTitle(c) ?? OrderPrefix.Replace(System.IO.Path.GetFileName(c), string.Empty).Trim()), StringComparer.Ordinal);
+
+        // a show named like the folder itself ("Himouto! Umaru-chan"): the folder steps aside first
+        var from = dir;
+        if (titles.Values.Any(x => System.IO.Path.Combine(root, x) == dir))
+        {
+            from = dir + " (splitting)";
+            ctx.Source = dir;
+            Move(p, ctx, dir, from, "dirmove", "split");
+            ctx.Taken.Remove(dir);
+        }
+
+        foreach (var child in children)
+        {
+            ctx.Source = child;
+            var now = System.IO.Path.Combine(from, System.IO.Path.GetFileName(child));
+            if (File.Exists(System.IO.Path.Combine(child, "season.nfo")))
+            {
+                var childBin = System.IO.Path.Combine(bin, Safe(System.IO.Path.GetFileName(child)));
+                MkDirs(p, ctx, childBin);
+                Move(p, ctx, System.IO.Path.Combine(now, "season.nfo"), System.IO.Path.Combine(childBin, "season.nfo"), "move", "split");
+            }
+
+            var target = System.IO.Path.Combine(root, titles[child]);
+            if (target == dir)
+            {
+                // free again once the folder stepped aside (Move would see it as taken now)
+                ctx.Taken.Add(target);
+                p.Ops.Add(new PlanOp { Kind = "dirmove", From = now, To = target, Note = "split", Source = child });
+            }
+            else
+            {
+                Move(p, ctx, now, target, "dirmove", "split");
+            }
+        }
+
+        ctx.Source = dir;
+        var meta = Directory.GetFiles(dir).Where(f => !IsJunk(f) && MetaExt.Contains(System.IO.Path.GetExtension(f))).ToList();
+        if (meta.Count > 0)
+        {
+            MkDirs(p, ctx, bin);
+            foreach (var f in meta)
+            {
+                Move(p, ctx, System.IO.Path.Combine(from, System.IO.Path.GetFileName(f)), System.IO.Path.Combine(bin, System.IO.Path.GetFileName(f)), "move", "split");
+            }
+        }
+
+        p.Ops.Add(new PlanOp { Source = dir, Kind = "rmdir", To = from, Note = "if empty after flatten" });
+        ctx.Source = null;
+        p.Tree = BuildTree(dir, 1, null);
+        p.Warnings.Add("Split into shows: on 📁 Move folders each subfolder becomes a show of its own in the library. After the scan, identify each one and "
+            + "put them in one collection (📚 Add to collection) - the curator then shows them together in one frame.");
+    }
+
     /// <summary>"Each season its own show" layout, but this folder holds season folders you chose to keep (grouped show).</summary>
     private static bool GroupedShow(string dir) =>
-        Flat && Directory.GetDirectories(dir).Any(d => FolderRuleFor(d) is { Action: "season" });
+        Flat && Directory.GetDirectories(dir).Any(KeptSeason);
+
+    /// <summary>A season folder kept inside its show: you chose Stay, or it has a season.nfo (written by ✏ Rename).</summary>
+    private static bool KeptSeason(string dir) =>
+        FolderRuleFor(dir) is { Action: "season" } || (FolderRuleFor(dir) == null && File.Exists(System.IO.Path.Combine(dir, "season.nfo")));
+
+    /// <summary>The name in a season folder's leftover tvshow.nfo (from when it was a show of its own): its exact title.</summary>
+    private static string? OldShowTitle(string dir)
+    {
+        var f = System.IO.Path.Combine(dir, "tvshow.nfo");
+        if (!File.Exists(f))
+        {
+            return null;
+        }
+
+        try
+        {
+            var x = XDocument.Load(f).Root;
+            var name = x?.Element("originaltitle")?.Value?.Trim();
+            return string.IsNullOrEmpty(name) ? x?.Element("title")?.Value?.Trim() : name;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string? NfoTitle(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? XDocument.Load(file).Root?.Element("title")?.Value?.Trim() : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static readonly Regex SubLang = new(@"\.(?<t>[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?|forced|sdh|default)$", RegexOptions.IgnoreCase);
+
+    /// <summary>A subtitle's language / flag tag(s) at the end of its name (".sc", ".en", ".zh-Hans", ".forced"), kept on rename.</summary>
+    private static string SubtitleTag(string file)
+    {
+        var stem = System.IO.Path.GetFileNameWithoutExtension(file);
+        var tags = new List<string>();
+        for (var i = 0; i < 2; i++)
+        {
+            var m = SubLang.Match(stem);
+            if (!m.Success)
+            {
+                break;
+            }
+
+            tags.Insert(0, "." + m.Groups["t"].Value);
+            stem = stem.Substring(0, m.Index);
+        }
+
+        return string.Concat(tags);
+    }
+
+    /// <summary>Season / episode a subtitle file is for, read from its name ("S01E01", "- 01").</summary>
+    private static (int? Season, int? Episode) SubtitleEpisode(string file)
+    {
+        var name = System.IO.Path.GetFileNameWithoutExtension(file);
+        var se = Regex.Match(name, @"\bS(?<s>\d{1,2})\s*E(?<e>\d{1,4})(?!\d)", RegexOptions.IgnoreCase);
+        if (se.Success)
+        {
+            return (int.Parse(se.Groups["s"].Value, CultureInfo.InvariantCulture), int.Parse(se.Groups["e"].Value, CultureInfo.InvariantCulture));
+        }
+
+        var stem = name.Substring(0, name.Length - SubtitleTag(file).Length);
+        var clean = CleanSpaces(Regex.Replace(EpNoise.Replace(stem, " "), @"[._]+", " "));
+        var m = TrailingEpisode.Match(clean);
+        if (!m.Success)
+        {
+            m = EpMarker.Match(clean);
+        }
+
+        return m.Success && int.TryParse(m.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? (null, n) : (null, null);
+    }
+
+    /// <summary>An episode NFO with just its season / episode number (the rest still comes from the metadata source).</summary>
+    private static string EpisodeNfo(int season, int episode, int? episodeEnd) =>
+        new XDocument(new XElement("episodedetails",
+            new XElement("season", season),
+            new XElement("episode", episode),
+            episodeEnd is int en ? new XElement("episodenumberend", en) : null)).ToString();
 
     /// <summary>A season folder's season.nfo: its number (for the order) and title, locked.</summary>
     private static string SeasonNfo(string title, int? season) =>
@@ -2268,11 +2581,21 @@ public class CuratorService
         {
             if (r.Path == op.From)
             {
-                Config.FolderRules.Remove(r);
                 if (op.Note == "group with")
                 {
+                    // it becomes a season of the group (Jellyfin: folders inside a show are its seasons), titled after the show it was
+                    Config.FolderRules.Remove(r);
                     Config.FolderRules.RemoveAll(x => x.Path == op.To);
                     Config.FolderRules.Add(new FolderRule { Path = op.To, Action = "season", Season = r.Season, Episode = r.Episode, Title = r.Title });
+
+                }
+                else if (op.Note is "flatten" or "to Specials" or "to Movies library" or "to trash" or "extras" or "merged into extras" or "split" or "new show")
+                {
+                    Config.FolderRules.Remove(r); // its one-off move is done
+                }
+                else
+                {
+                    r.Path = op.To; // just renamed (Rename files): the choices (Stay, S#, title, E#) go with it
                 }
 
                 changed = true;
@@ -2287,6 +2610,122 @@ public class CuratorService
         return changed;
     }
 
+    /// <summary>
+    /// The item now: by id, else by its path - followed through the moves / renames logged since (an earlier job in the
+    /// queue may have renamed it) - waiting up to ~2 minutes for Jellyfin to list it at that path.
+    /// </summary>
+    public async Task<BaseItem?> FindItem(string? id, string? path, CancellationToken ct)
+    {
+        if (Guid.TryParse(id, out var g) && _library.GetItemById(g) is { } byId && (string.IsNullOrEmpty(byId.Path) || Directory.Exists(byId.Path) || File.Exists(byId.Path)))
+        {
+            return byId;
+        }
+
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var now = FollowMoves(path.TrimEnd('/'));
+        if (!Directory.Exists(now) && !File.Exists(now))
+        {
+            return null;
+        }
+
+        _monitor.ReportFileSystemChanged(now);
+        for (var i = 0; i < 60; i++)
+        {
+            if (_library.FindByPath(now, null) is { } byPath && !byPath.IsVirtualItem)
+            {
+                return byPath;
+            }
+
+            await Task.Delay(2000, ct).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    /// <summary>Where a path is now, after the folder changes in the history (oldest first; undone ones skipped).</summary>
+    private static string FollowMoves(string path)
+    {
+        if (!Directory.Exists(LogDir))
+        {
+            return path;
+        }
+
+        foreach (var log in Directory.GetFiles(LogDir, "apply-*.json").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            List<PlanOp>? ops;
+            try
+            {
+                ops = JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(log));
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            foreach (var op in ops ?? new List<PlanOp>())
+            {
+                if (op.Kind is not ("move" or "dirmove") || string.IsNullOrEmpty(op.From))
+                {
+                    continue;
+                }
+
+                if (path == op.From)
+                {
+                    path = op.To;
+                }
+                else if (IsUnder(path, op.From))
+                {
+                    path = op.To + path.Substring(op.From.Length);
+                }
+            }
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// After folder changes (with "tell Jellyfin right away" on): wait until Jellyfin lists the moved / renamed shows and
+    /// movies at their new paths, so the next queued job and the reloaded list see the new state (up to ~2 minutes).
+    /// </summary>
+    private async Task WaitForJellyfin(IEnumerable<PlanOp> done, Action<int, int, string>? report)
+    {
+        if (!Config.ScanAfterChanges)
+        {
+            return;
+        }
+
+        var roots = LibraryRoots();
+        var targets = done
+            .Where(o => o.Kind is "dirmove" or "move" && !string.IsNullOrEmpty(o.To) && roots.Contains(System.IO.Path.GetDirectoryName(o.To) ?? string.Empty)
+                || (o.Kind == "move" && IsVideo(o.To) && roots.Any(r => IsUnder(o.To, r)) && o.Note == "to Movies library"))
+            .Select(o => o.To)
+            .Where(p => Directory.Exists(p) || File.Exists(p))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < 60; i++)
+        {
+            var missing = targets.Count(p => _library.FindByPath(p, null) is null);
+            if (missing == 0)
+            {
+                return;
+            }
+
+            report?.Invoke(targets.Count - missing, targets.Count, $"waiting for Jellyfin to pick up {missing} folder(s)…");
+            await Task.Delay(2000).ConfigureAwait(false);
+        }
+
+        _logger.LogWarning("Curator: Jellyfin hasn't listed all moved folders yet (gave up waiting after 2 minutes)");
+    }
+
     private static readonly Regex OrderPrefix = new(@"^\d+\s*[.\-_)]\s*");
 
     /// <summary>
@@ -2298,12 +2737,13 @@ public class CuratorService
         List<string> excludedDirs, HashSet<string> excludedFiles, Func<string, bool> handledElsewhere)
     {
         var rules = Config.FolderRules
-            .Where(r => IsUnder(r.Path, itemDir) && r.Action is "up" or "extras" or "movies" or "show" or "into" or "trash")
+            .Where(r => IsUnder(r.Path, itemDir) && r.Action is "up" or "extras" or "movies" or "show" or "into" or "trash" or "newshow")
             .Where(r => !handledElsewhere(r.Path) && !excludedFiles.Contains(r.Path) && (Directory.Exists(r.Path) || File.Exists(r.Path)))
             .OrderBy(r => r.Path.Length)
             .ToList();
         foreach (var r in rules)
         {
+            ctx.Source = r.Path;
             if (excludedDirs.Any(d => IsUnder(r.Path, d)))
             {
                 continue; // moves along with a folder above it
@@ -2317,6 +2757,7 @@ public class CuratorService
             {
                 "up" => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(parent)!, name),
                 "trash" => TrashFor(r.Path, libraryRoot),
+                "newshow" => string.IsNullOrEmpty(r.Target) || !NewOrExistingDir(r.Target) ? null : System.IO.Path.Combine(r.Target, name),
                 "show" => System.IO.Path.Combine(libraryRoot, name),
                 "into" => string.IsNullOrEmpty(r.Target) || !NewOrExistingDir(r.Target) || IsUnder(r.Target, r.Path) ? null
                     : System.IO.Path.Combine(r.Target, name),
@@ -2339,6 +2780,7 @@ public class CuratorService
                 "up" or "show" => "flatten",
                 "into" => "group with",
                 "trash" => "to trash",
+                "newshow" => "new show",
                 "extras" => specials != null ? "to Specials" : "extras",
                 _ => "to Movies library",
             };
@@ -2361,6 +2803,8 @@ public class CuratorService
                 excludedFiles.Add(r.Path);
             }
         }
+
+        ctx.Source = null;
     }
 
     /// <summary>The subfolders of <paramref name="dir"/> (any depth, up to 4 levels) with what happens to each.</summary>
@@ -2432,6 +2876,7 @@ public class CuratorService
                 Path = f, Name = System.IO.Path.GetFileName(f), VideoCount = 1,
                 Action = rule?.Action is { } a && a != "leave" ? a : "stay", Chosen = rule != null && rule.Action != "leave", Target = rule?.Target,
                 ItemId = item?.Id.ToString("N"),
+                ItemType = item?.GetType().Name,
             };
             if (rule?.Episode is int own)
             {
@@ -2463,7 +2908,7 @@ public class CuratorService
         }
 
         target = target?.TrimEnd('/');
-        if (action == "into" && (string.IsNullOrEmpty(target) || !NewOrExistingDir(target) || !roots.Any(r => IsUnder(target, r))
+        if (action is "into" or "newshow" && (string.IsNullOrEmpty(target) || !NewOrExistingDir(target) || !roots.Any(r => IsUnder(target, r))
             || target == path || IsUnder(target, path)))
         {
             return false;
@@ -2477,7 +2922,7 @@ public class CuratorService
             Config.FolderRules.Add(new FolderRule
             {
                 Path = path, Action = action == "stay" ? "season" : action, Season = season, Episode = episode,
-                Target = action == "into" ? target : null,
+                Target = action is "into" or "newshow" ? target : null,
                 Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
             });
         }
@@ -2648,16 +3093,33 @@ public class CuratorService
                 continue;
             }
 
-            var targets = new List<BaseItem> { item };
-            if (item is Series)
+            if (item.IsLocked != locked)
             {
-                targets.AddRange(_library.GetItemList(new InternalItemsQuery { AncestorIds = new[] { item.Id }, Recursive = true }));
+                item.IsLocked = locked;
+                await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
             }
 
-            foreach (var t in targets.Where(t => t.IsLocked != locked))
+            if (item is Series)
             {
-                t.IsLocked = locked;
-                await t.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+                // a show's seasons / episodes (hundreds of writes for long shows): in the background, so the request
+                // returns at once (a reverse proxy gives up after ~60 s)
+                var showId = item.Id;
+                _ = WorkQueue.Enqueue("lock-" + Guid.NewGuid().ToString("N"), async () =>
+                {
+                    try
+                    {
+                        foreach (var c in _library.GetItemList(new InternalItemsQuery { AncestorIds = new[] { showId }, Recursive = true })
+                            .Where(c => c.IsLocked != locked))
+                        {
+                            c.IsLocked = locked;
+                            await c.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Curator: locking the episodes of {Id} stopped", showId);
+                    }
+                });
             }
 
             n++;
@@ -2798,6 +3260,7 @@ public class CuratorService
             result.Log = path;
             _logger.LogInformation("Curator: applied {Count} changes, log {Log}", log.Count, path);
             ScanOrDefer(log.Count);
+            await WaitForJellyfin(log, report).ConfigureAwait(false);
         }
 
         return result;
@@ -2868,9 +3331,11 @@ public class CuratorService
 
         var lastTotal = CountOps(last);
         var lastN = 0;
+        var reverted = Reversed(last);
         var result = await UndoLog(last, ct, text => report?.Invoke(++lastN, lastTotal, text)).ConfigureAwait(false);
         PruneHistory();
         ScanOrDefer(result.Done);
+        await WaitForJellyfin(reverted, report).ConfigureAwait(false);
         return result;
     }
 
@@ -2908,7 +3373,23 @@ public class CuratorService
         _logger.LogInformation("Curator: rewound {Count} folder change(s) back to before {Id}", logs.Count, id);
         PruneHistory();
         ScanOrDefer(total.Done);
+        await WaitForJellyfin(logs.Select(l => l.Replace(".json", ".undone", StringComparison.Ordinal)).SelectMany(Reversed).ToList(), report).ConfigureAwait(false);
         return total;
+    }
+
+    /// <summary>A log's moves the other way round (what an undo of it does), for waiting on Jellyfin afterwards.</summary>
+    private static List<PlanOp> Reversed(string file)
+    {
+        try
+        {
+            var ops = File.Exists(file) ? JsonSerializer.Deserialize<List<PlanOp>>(File.ReadAllText(file)) ?? new() : new();
+            return ops.Where(o => o.Kind is "move" or "dirmove" && !string.IsNullOrEmpty(o.From))
+                .Select(o => new PlanOp { Kind = o.Kind, From = o.To, To = o.From!, Note = o.Note }).ToList();
+        }
+        catch (Exception)
+        {
+            return new List<PlanOp>();
+        }
     }
 
     /// <summary>Reverse one apply log (newest operation first) and mark it undone.</summary>

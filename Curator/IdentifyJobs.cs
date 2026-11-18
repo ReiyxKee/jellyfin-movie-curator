@@ -5,6 +5,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Providers;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,9 @@ namespace Jellyfin.Plugin.MovieCurator.Curator;
 public class IdentifyJobRequestItem
 {
     [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Its folder / file when the job was started: found again by it if the id changed (moved / renamed).</summary>
+    [JsonPropertyName("path")] public string? Path { get; set; }
 
     [JsonPropertyName("name")] public string? Name { get; set; }
 
@@ -59,6 +63,8 @@ public class IdentifyJobItem
     [JsonIgnore] public RemoteSearchResult Result { get; set; } = new();
 
     [JsonIgnore] public bool ReplaceImages { get; set; } = true;
+
+    [JsonIgnore] public string? Path { get; set; }
 }
 
 public class IdentifyJob : ICuratorJob
@@ -81,7 +87,9 @@ public class IdentifyJob : ICuratorJob
     /// <summary>null | "stop" (finish current item, skip the rest) | "force" (abort now, roll back current item)</summary>
     [JsonPropertyName("stopMode")] public string? StopMode { get; set; }
 
-    [JsonPropertyName("steps")] public int Steps => 6;
+    [JsonPropertyName("steps")] public int Steps => 7;
+
+    [JsonIgnore] public bool Started { get; set; }
 
     [JsonIgnore] public DateTime Created { get; } = DateTime.UtcNow;
 
@@ -104,7 +112,7 @@ public class IdentifyJob : ICuratorJob
             Finished = Finished,
             StopMode = StopMode,
             CanStop = !Finished,
-            Current = cur == null ? (Finished ? "done" : "queued") : $"{cur.Name} → {cur.Match} · {cur.Step} ({cur.StepIndex}/{Steps})",
+            Current = cur == null ? (Finished ? "done" : Started ? "next item…" : WorkQueue.Waiting(Id)) : $"{cur.Name} → {cur.Match} · {cur.Step} ({cur.StepIndex}/{Steps})",
             Created = JobRegistry.Iso(Created),
         };
     }
@@ -119,7 +127,6 @@ public class IdentifyJob : ICuratorJob
 public static class IdentifyQueue
 {
     private static readonly ConcurrentDictionary<string, IdentifyJob> Jobs = new();
-    private static readonly SemaphoreSlim Gate = new(1, 1); // one job at a time per server
 
     public static IdentifyJob Start(
         IdentifyJobRequest request,
@@ -139,15 +146,16 @@ public static class IdentifyQueue
                 Match = i.Result.Name + (i.Result.ProductionYear is int y ? $" ({y})" : string.Empty),
                 Result = i.Result,
                 ReplaceImages = i.ReplaceImages,
+                Path = i.Path,
             }).ToList(),
         };
         Jobs[job.Id] = job;
         JobRegistry.Add(job);
         Prune();
 
-        _ = Task.Run(async () =>
+        _ = WorkQueue.Enqueue(job.Id, async () =>
         {
-            await Gate.WaitAsync().ConfigureAwait(false);
+            job.Started = true;
             try
             {
                 foreach (var it in job.Items)
@@ -169,7 +177,6 @@ public static class IdentifyQueue
             finally
             {
                 job.Finished = true;
-                Gate.Release();
                 logger.LogInformation(
                     "Curator: identify job {Id} finished: {Done} done, {Failed} failed, {Cancelled} cancelled/rolled back{Stop}",
                     job.Id,
@@ -254,10 +261,16 @@ public static class IdentifyQueue
         Guid id = Guid.Empty;
         try
         {
-            if (!Guid.TryParse(it.ItemId, out id) || library.GetItemById(id) is not { } item)
+            // found by id, else by its path (followed through the moves / renames done since the job was started)
+            it.Step = "finding the item";
+            var found = await service.FindItem(it.ItemId, it.Path, ct).ConfigureAwait(false);
+            if (found is not { } item)
             {
-                throw new InvalidOperationException("Item not found (was it moved or removed?)");
+                throw new InvalidOperationException("Item not found: it was moved or removed and Jellyfin doesn't list it yet (reload the list and try again)");
             }
+
+            id = item.Id;
+            it.ItemId = id.ToString("N");
 
             it.Name ??= item.Name;
             before = new Snapshot
@@ -282,48 +295,70 @@ public static class IdentifyQueue
             Step(1, "removing old NFO");
             var removed = service.RemoveNfo(item);
 
-            // same as Jellyfin's Identify (ItemLookupController.ApplySearchCriteria)
-            Step(2, "applying match (fetching metadata)");
-            logger.LogInformation("Curator: applying {Match} to {Name}", it.Match, item.Name);
-            item.ProviderIds = it.Result.ProviderIds;
-
-            // a show's refresh also re-fetches every episode (a minute or more for long shows): report how far it got
-            using var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var progress = item is Series ? WatchEpisodes(it, id, library, watch.Token) : Task.CompletedTask;
-            await providers.RefreshFullItem(
-                item,
-                new MetadataRefreshOptions(new DirectoryService(fileSystem))
-                {
-                    MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
-                    ImageRefreshMode = MetadataRefreshMode.FullRefresh,
-                    ReplaceAllMetadata = true,
-                    ReplaceAllImages = it.ReplaceImages,
-                    SearchResult = it.Result,
-                    RemoveOldMetadata = true,
-                },
-                ct).ConfigureAwait(false);
-            await watch.CancelAsync().ConfigureAwait(false);
-            await progress.ConfigureAwait(false);
-            item = library.GetItemById(id) ?? item;
-
-            Step(3, "writing new NFO");
-            if (removed > 0 || job.Options.WriteNfo)
-            {
-                service.WriteNfo(item, job.Options.LockNfo);
-            }
-
-            Step(4, "locking");
-            if (job.Options.LockAfter || before.IsLocked)
+            // only the source you picked: its metadata and artwork are written, then the item is locked before Jellyfin
+            // fills in seasons / episodes (so no other source - e.g. AniList ranked first - can replace the title or poster)
+            Step(2, "applying match from " + (it.Result.SearchProviderName ?? "the picked source"));
+            logger.LogInformation("Curator: applying {Match} to {Name} (only from {Source})", it.Match, item.Name, it.Result.SearchProviderName);
+            item.ProviderIds = new Dictionary<string, string>(it.Result.ProviderIds);
+            var single = await ApplyFromPickedSource(item, it.Result, providers, library, logger, ct).ConfigureAwait(false);
+            if (single)
             {
                 item.IsLocked = true;
                 await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
             }
 
+            // seasons / episodes (a show) - or everything, when the picked source couldn't be asked on its own
+            using var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var progress = item is Series ? WatchEpisodes(it, id, library, watch.Token) : Task.CompletedTask;
+            if (!single || item is Series)
+            {
+                await providers.RefreshFullItem(
+                    item,
+                    new MetadataRefreshOptions(new DirectoryService(fileSystem))
+                    {
+                        MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
+                        ImageRefreshMode = single ? MetadataRefreshMode.Default : MetadataRefreshMode.FullRefresh,
+                        ReplaceAllMetadata = !single,
+                        ReplaceAllImages = !single && it.ReplaceImages,
+                        SearchResult = single ? null : it.Result,
+                        RemoveOldMetadata = !single,
+                    },
+                    ct).ConfigureAwait(false);
+            }
+
+            await watch.CancelAsync().ConfigureAwait(false);
+            await progress.ConfigureAwait(false);
+            item = library.GetItemById(id) ?? item;
+            await KeepPickedMatch(item, it.Result, providers, logger, ct).ConfigureAwait(false);
+
+            // the pick is final: always a fresh, locked NFO and a locked item, so no later refresh / source changes it
+            Step(3, "writing new NFO");
+            service.WriteNfo(item, true);
+
+            Step(4, "locking");
+            item.IsLocked = true;
+            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+
             // a match the user picked is a confirmed one
             Step(5, "marking verified");
             service.SetVerified(new[] { it.ItemId }, true);
 
-            it.StepIndex = 6;
+            // named after the match right away: folder, videos and all subtitle files (logged: undo in the history)
+            Step(6, "renaming (folder, videos, subtitles)");
+            var renamed = await service.Apply(
+                new[] { it.ItemId },
+                new PlanOptions
+                {
+                    Type = job.Options.Type, Mode = "rename", Ids = it.ItemId, Rename = true, Episodes = job.Options.Type == "series",
+                    Nfo = false, LockNfo = true, Flatten = false,
+                },
+                ct).ConfigureAwait(false);
+            if (renamed.Errors.Count > 0)
+            {
+                it.Error = "renamed with problems: " + string.Join("; ", renamed.Errors.Take(3));
+            }
+
+            it.StepIndex = 7;
             it.Step = "done";
             it.Status = "done";
         }
@@ -340,6 +375,192 @@ public static class IdentifyQueue
     }
 
     /// <summary>Force stop: put the item back the way it was (IDs, titles, lock, NFO files, verified mark).</summary>
+    /// <summary>
+    /// Metadata and artwork from only the picked result's source (e.g. TheMovieDb), written onto the item. False when that
+    /// source can't be asked on its own (then the normal refresh + "the pick wins" fix-up is used).
+    /// </summary>
+    private static async Task<bool> ApplyFromPickedSource(BaseItem item, RemoteSearchResult picked, IProviderManager providers, ILibraryManager library, ILogger logger, CancellationToken ct)
+    {
+        var source = picked.SearchProviderName;
+        if (string.IsNullOrEmpty(source))
+        {
+            return false;
+        }
+
+        try
+        {
+            BaseItem? fetched = null;
+            if (item is Series series)
+            {
+                var provider = providers.GetMetadataProviders<Series>(item, library.GetLibraryOptions(item))
+                    .OfType<IRemoteMetadataProvider<Series, SeriesInfo>>().FirstOrDefault(x => string.Equals(x.Name, source, StringComparison.OrdinalIgnoreCase));
+                if (provider == null)
+                {
+                    return false;
+                }
+
+                var info = series.GetLookupInfo();
+                info.ProviderIds = new Dictionary<string, string>(picked.ProviderIds);
+                info.Name = picked.Name;
+                info.Year = picked.ProductionYear;
+                var r = await provider.GetMetadata(info, ct).ConfigureAwait(false);
+                if (r.HasMetadata && r.Item != null)
+                {
+                    fetched = r.Item;
+                    series.Status = r.Item.Status;
+                }
+            }
+            else if (item is MediaBrowser.Controller.Entities.Movies.Movie movie)
+            {
+                var provider = providers.GetMetadataProviders<MediaBrowser.Controller.Entities.Movies.Movie>(item, library.GetLibraryOptions(item))
+                    .OfType<IRemoteMetadataProvider<MediaBrowser.Controller.Entities.Movies.Movie, MovieInfo>>()
+                    .FirstOrDefault(x => string.Equals(x.Name, source, StringComparison.OrdinalIgnoreCase));
+                if (provider == null)
+                {
+                    return false;
+                }
+
+                var info = movie.GetLookupInfo();
+                info.ProviderIds = new Dictionary<string, string>(picked.ProviderIds);
+                info.Name = picked.Name;
+                info.Year = picked.ProductionYear;
+                var r = await provider.GetMetadata(info, ct).ConfigureAwait(false);
+                if (r.HasMetadata && r.Item != null)
+                {
+                    fetched = r.Item;
+                }
+            }
+
+            if (fetched == null)
+            {
+                logger.LogWarning("Curator: {Source} returned no metadata for {Name}", source, picked.Name);
+                return false;
+            }
+
+            item.Name = string.IsNullOrWhiteSpace(fetched.Name) ? picked.Name : fetched.Name;
+            item.OriginalTitle = string.IsNullOrWhiteSpace(fetched.OriginalTitle) ? item.Name : fetched.OriginalTitle;
+            item.Overview = fetched.Overview ?? picked.Overview;
+            item.ProductionYear = fetched.ProductionYear ?? picked.ProductionYear;
+            item.PremiereDate = fetched.PremiereDate ?? item.PremiereDate;
+            item.EndDate = fetched.EndDate ?? item.EndDate;
+            item.CommunityRating = fetched.CommunityRating ?? item.CommunityRating;
+            item.OfficialRating = fetched.OfficialRating ?? item.OfficialRating;
+            if (fetched.Genres?.Length > 0) item.Genres = fetched.Genres;
+            if (fetched.Studios?.Length > 0) item.Studios = fetched.Studios;
+            if (fetched.Tags?.Length > 0) item.Tags = fetched.Tags;
+            foreach (var kv in fetched.ProviderIds)
+            {
+                item.ProviderIds[kv.Key] = kv.Value; // ids the picked source knows (e.g. TMDB also gives IMDb / TVDB)
+            }
+
+            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+
+            // artwork from the same source only, replacing what's there
+            var images = await providers.GetAvailableRemoteImages(item, new RemoteImageQuery(source) { IncludeAllLanguages = false }, ct).ConfigureAwait(false);
+            foreach (var type in new[] { ImageType.Primary, ImageType.Backdrop, ImageType.Logo, ImageType.Thumb })
+            {
+                var best = images.Where(i => i.Type == type).OrderByDescending(i => i.CommunityRating ?? 0).FirstOrDefault();
+                if (best?.Url == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await providers.SaveImage(item, best.Url, type, type == ImageType.Backdrop ? 0 : null, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Curator: could not download the {Type} image from {Source}", type, source);
+                }
+            }
+
+            await item.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Curator: asking only {Source} failed for {Name}; using the normal refresh", source, picked.Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The match you picked wins: during the refresh every enabled source runs, and one ranked first (e.g. AniList for an
+    /// anime library) can find something else by name ("Arcane" -> "1999! Occult..."). Then its ids are dropped and the
+    /// picked title / year / description are put back and locked, so the next refresh keeps them too.
+    /// </summary>
+    private static async Task KeepPickedMatch(BaseItem item, RemoteSearchResult picked, IProviderManager providers, ILogger logger, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(picked.Name))
+        {
+            return;
+        }
+
+        // another source took over (its title isn't the pick's): its ids go, and its artwork is replaced below
+        // ... or an anime source added itself to a pick from elsewhere (its own match by name: AniList "Arcane" -> "1999!")
+        var anime = new[] { "AniList", "AniDB", "AniSearch", "Kitsu" };
+        var overridden = !string.Equals(item.Name?.Trim(), picked.Name.Trim(), StringComparison.OrdinalIgnoreCase)
+            || (!anime.Any(picked.ProviderIds.ContainsKey) && anime.Any(item.ProviderIds.ContainsKey));
+        if (overridden)
+        {
+            var foreign = item.ProviderIds.Keys.Where(k => !picked.ProviderIds.ContainsKey(k)).ToList();
+            logger.LogInformation("Curator: {Source} overrode the picked match {Picked} with {Got}; keeping the pick (dropping {Ids})",
+                foreign.Count > 0 ? string.Join("/", foreign) : "another source", picked.Name, item.Name, string.Join(", ", foreign));
+            foreach (var k in foreign)
+            {
+                item.ProviderIds.Remove(k);
+            }
+        }
+
+        foreach (var kv in picked.ProviderIds)
+        {
+            item.ProviderIds[kv.Key] = kv.Value;
+        }
+
+        item.Name = picked.Name;
+        if (overridden || string.IsNullOrWhiteSpace(item.OriginalTitle))
+        {
+            item.OriginalTitle = picked.Name; // otherwise the source's (native) original title stays
+        }
+        if (picked.ProductionYear is int y)
+        {
+            item.ProductionYear = y;
+        }
+
+        if (!string.IsNullOrWhiteSpace(picked.Overview))
+        {
+            item.Overview = picked.Overview;
+        }
+
+        var locked = item.LockedFields.ToList();
+        foreach (var f in new[] { MetadataField.Name, MetadataField.Overview })
+        {
+            if (!locked.Contains(f))
+            {
+                locked.Add(f);
+            }
+        }
+
+        item.LockedFields = locked.ToArray();
+        await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+
+        // the poster is the pick's too: a source ranked first for images (AniList...) can bring another show's poster
+        // even when the title stayed right, so the picked result's poster always replaces it
+        if (!string.IsNullOrWhiteSpace(picked.ImageUrl))
+        {
+            try
+            {
+                await providers.SaveImage(item, picked.ImageUrl, ImageType.Primary, null, ct).ConfigureAwait(false);
+                await item.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Curator: could not download the picked poster for {Name}", picked.Name);
+            }
+        }
+    }
+
     /// <summary>While Jellyfin refreshes a show, counts the episodes it has refreshed since the step started.</summary>
     private static async Task WatchEpisodes(IdentifyJobItem it, Guid seriesId, ILibraryManager library, CancellationToken ct)
     {

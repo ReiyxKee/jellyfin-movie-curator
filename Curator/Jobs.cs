@@ -321,6 +321,8 @@ public static class SearchQueue
 
 public class FolderJob : ICuratorJob
 {
+    [JsonIgnore] public bool Started { get; set; }
+
     [JsonPropertyName("id")] public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     [JsonPropertyName("title")] public string Title { get; set; } = string.Empty;
@@ -347,16 +349,63 @@ public class FolderJob : ICuratorJob
         Failed = Result?.Errors.Count ?? 0,
         Finished = Finished,
         CanStop = false, // folder changes always run to the end; use the history to undo
-        Current = Finished ? (Result == null ? "failed" : $"done: {Result.Done} change(s)" + (Result.Errors.Count > 0 ? $", {Result.Errors.Count} problem(s)" : string.Empty)) : Current,
+        Current = Finished ? (Result == null ? "failed" : $"done: {Result.Done} change(s)" + (Result.Errors.Count > 0 ? $", {Result.Errors.Count} problem(s)" : string.Empty))
+            : !Started ? WorkQueue.Waiting(Id) : Current,
         Created = JobRegistry.Iso(Created),
     };
+}
+
+/// <summary>
+/// The one queue for everything that changes something (identify, folder changes, locking a show's episodes): strictly
+/// one at a time, in the order they were started, so a job never runs against a state another job is still changing.
+/// </summary>
+public static class WorkQueue
+{
+    private static readonly object Sync = new();
+    private static readonly List<string> Line = new();
+    private static Task _tail = Task.CompletedTask;
+
+    /// <summary>Runs work once everything queued before it has finished.</summary>
+    public static Task Enqueue(string id, Func<Task> work)
+    {
+        lock (Sync)
+        {
+            Line.Add(id);
+            var next = _tail.ContinueWith(async _ =>
+            {
+                try
+                {
+                    await work().ConfigureAwait(false);
+                }
+                finally
+                {
+                    lock (Sync)
+                    {
+                        Line.Remove(id);
+                    }
+                }
+            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+            _tail = next.ContinueWith(_ => { }, TaskScheduler.Default); // a failed job never blocks the queue
+            return next;
+        }
+    }
+
+    /// <summary>Place in the line (1 = running now), 0 when not queued.</summary>
+    public static int Position(string id)
+    {
+        lock (Sync)
+        {
+            return Line.IndexOf(id) + 1;
+        }
+    }
+
+    public static string Waiting(string id) => Position(id) is var n && n > 1 ? $"queued: #{n} in line (waits for the jobs before it)" : "starting…";
 }
 
 /// <summary>Runs folder changes on the server, one job at a time, reporting progress per change.</summary>
 public static class FolderQueue
 {
     private static readonly ConcurrentDictionary<string, FolderJob> Jobs = new();
-    private static readonly SemaphoreSlim Gate = new(1, 1);
 
     /// <summary>work(report) does the changes; report(done, total, text) updates the progress.</summary>
     public static FolderJob Start(string title, Func<Action<int, int, string>, Task<ApplyResult>> work, ILogger logger)
@@ -364,9 +413,9 @@ public static class FolderQueue
         var job = new FolderJob { Title = title, Current = "queued" };
         Jobs[job.Id] = job;
         JobRegistry.Add(job);
-        _ = Task.Run(async () =>
+        _ = WorkQueue.Enqueue(job.Id, async () =>
         {
-            await Gate.WaitAsync().ConfigureAwait(false);
+            job.Started = true;
             try
             {
                 job.Result = await work((done, total, text) =>
@@ -384,7 +433,6 @@ public static class FolderQueue
             finally
             {
                 job.Finished = true;
-                Gate.Release();
             }
         });
         return job;
