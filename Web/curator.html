@@ -1942,7 +1942,7 @@
   }
   function jobStatusText(x) {
     switch (x.status) {
-      case 'done': return '✔ applied';
+      case 'done': return x.error ? '⚠ applied: ' + x.error : '✔ applied';
       case 'failed': return 'Failed: ' + (x.error || 'unknown error');
       case 'cancelled': return 'not applied (stopped)';
       case 'rolledback': return '↩ ' + (x.step || 'rolled back');

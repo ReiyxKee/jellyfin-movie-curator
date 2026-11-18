@@ -642,8 +642,24 @@ public class CuratorService
         return Safe(c);
     }
 
+    private static readonly string[] KnownIdProviders =
+        { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB", "AniSearch", "Kitsu", "TvRage", "TmdbCollection", "Zap2It", "Tvcom" };
+
+    /// <summary>
+    /// One spelling per provider: Jellyfin reads an NFO's &lt;uniqueid type="anilist"&gt; back as "anilist", while the
+    /// AniList plugin (and a fresh match) uses "AniList". Treated as different keys, a show re-created from its NFO
+    /// (after its folder was renamed: new path = new item) lost its verified mark and looked "not identified / no NFO".
+    /// </summary>
+    private static string CanonicalId(string key) =>
+        KnownIdProviders.FirstOrDefault(p => string.Equals(p, key, StringComparison.OrdinalIgnoreCase)) ?? key;
+
     private static Dictionary<string, string> Ids(BaseItem item) =>
-        item.ProviderIds.Where(kv => !string.IsNullOrEmpty(kv.Value)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        CanonicalIds(item.ProviderIds);
+
+    private static Dictionary<string, string> CanonicalIds(IEnumerable<KeyValuePair<string, string>> ids) =>
+        ids.Where(kv => !string.IsNullOrEmpty(kv.Value))
+            .GroupBy(kv => CanonicalId(kv.Key), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Keys for custom names. Series keys are prefixed: TMDB movie and TV IDs are different number spaces.</summary>
     private static IEnumerable<string> OverrideKeys(BaseItem item)
@@ -664,15 +680,80 @@ public class CuratorService
     /// <summary>Identity of the current match: type + provider IDs (or the path when there are none).</summary>
     private static string Signature(BaseItem item)
     {
-        var ids = item.ProviderIds
-            .Where(kv => !string.IsNullOrEmpty(kv.Value) && kv.Key != "TmdbCollection")
+        var ids = Ids(item)
+            .Where(kv => kv.Key != "TmdbCollection")
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .Select(kv => kv.Key + "=" + kv.Value)
             .ToList();
         return (item is Series ? "series|" : "movie|") + (ids.Count > 0 ? string.Join("|", ids) : "path=" + item.Path);
     }
 
-    private static bool IsVerified(BaseItem item) => Config.Verified.Contains(Signature(item));
+    /// <summary>A stored mark in today's spelling (marks saved before the provider names were made canonical).</summary>
+    private static string NormalizeSignature(string sig)
+    {
+        var parts = sig.Split('|');
+        if (parts.Length < 2 || parts[1].StartsWith("path=", StringComparison.Ordinal))
+        {
+            return sig;
+        }
+
+        var ids = CanonicalIds(parts.Skip(1)
+            .Select(p => p.Split('=', 2))
+            .Where(kv => kv.Length == 2)
+            .Select(kv => new KeyValuePair<string, string>(kv[0], kv[1])));
+        return parts[0] + "|" + string.Join("|", ids
+            .Where(kv => kv.Key != "TmdbCollection")
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => kv.Key + "=" + kv.Value));
+    }
+
+    private static (List<string> From, int Count, HashSet<string> Set)? _verifiedCache;
+
+    private static HashSet<string> VerifiedSet()
+    {
+        var list = Config.Verified;
+        if (_verifiedCache is { } c && ReferenceEquals(c.From, list) && c.Count == list.Count)
+        {
+            return c.Set;
+        }
+
+        var set = new HashSet<string>(list.Select(NormalizeSignature), StringComparer.Ordinal);
+        _verifiedCache = (list, list.Count, set);
+        return set;
+    }
+
+    /// <summary>
+    /// The exact match, or one that only lost ids on the way (re-created from an older NFO that didn't keep e.g. TvRage):
+    /// every id it has left is one of a verified mark's, with the same value. An id that wasn't in the mark (another
+    /// source took over) still makes it unverified.
+    /// </summary>
+    private static bool IsVerified(BaseItem item)
+    {
+        var set = VerifiedSet();
+        var sig = Signature(item);
+        return set.Contains(sig) || set.Any(mark => Covers(mark, sig));
+    }
+
+    /// <summary>The (normalized) verified mark covers this signature: the same, or a superset of its ids (same values).</summary>
+    private static bool Covers(string mark, string sig)
+    {
+        if (mark == sig)
+        {
+            return true;
+        }
+
+        var cut = sig.IndexOf('|', StringComparison.Ordinal);
+        var kind = sig[..(cut + 1)];
+        var parts = sig[(cut + 1)..].Split('|');
+        if (parts[0].StartsWith("path=", StringComparison.Ordinal) || !mark.StartsWith(kind, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var ids = "|" + mark[kind.Length..] + "|";
+        return !ids.StartsWith("|path=", StringComparison.Ordinal)
+            && parts.All(p => ids.Contains("|" + p + "|", StringComparison.Ordinal));
+    }
 
     /// <summary>Mark (or unmark) the current identification of these items as correct.</summary>
     public int SetVerified(IEnumerable<string> itemIds, bool verified)
@@ -686,7 +767,7 @@ public class CuratorService
             }
 
             var sig = Signature(item);
-            Config.Verified.RemoveAll(v => v == sig);
+            Config.Verified.RemoveAll(v => Covers(NormalizeSignature(v), sig)); // incl. a mark it only matched as a subset
             if (verified)
             {
                 Config.Verified.Add(sig);
@@ -695,6 +776,7 @@ public class CuratorService
             n++;
         }
 
+        _verifiedCache = null;
         Plugin.Instance!.SaveConfiguration();
         return n;
     }
@@ -824,7 +906,7 @@ public class CuratorService
             return new Names(custom, custom, display, "custom");
         }
 
-        if (string.IsNullOrWhiteSpace(item.Name) || !SeriesIdProviders.Any(item.ProviderIds.ContainsKey))
+        if (string.IsNullOrWhiteSpace(item.Name) || !SeriesIdProviders.Any(Ids(item).ContainsKey))
         {
             return new Names(fromFolder, fromFolder, null, "filename");
         }
@@ -2327,18 +2409,64 @@ public class CuratorService
             x.Add(new XElement("plot", item.Overview));
         }
 
+        // the rest of the picked source's metadata, so the NFO alone rebuilds the item (Jellyfin reads these tags back)
+        if (item.CommunityRating is float rating)
+        {
+            x.Add(new XElement("rating", rating.ToString("0.#", CultureInfo.InvariantCulture)));
+        }
+
+        if (!string.IsNullOrEmpty(item.OfficialRating))
+        {
+            x.Add(new XElement("mpaa", item.OfficialRating));
+        }
+
+        if (item.PremiereDate is DateTime premiered)
+        {
+            x.Add(new XElement("premiered", premiered.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        }
+
+        if (item.EndDate is DateTime ended)
+        {
+            x.Add(new XElement("enddate", ended.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        }
+
+        if (item is Series { Status: { } status })
+        {
+            x.Add(new XElement("status", status.ToString()));
+        }
+
+        foreach (var g in item.Genres ?? Array.Empty<string>())
+        {
+            x.Add(new XElement("genre", g));
+        }
+
+        foreach (var s in item.Studios ?? Array.Empty<string>())
+        {
+            x.Add(new XElement("studio", s));
+        }
+
+        foreach (var t in item.Tags ?? Array.Empty<string>())
+        {
+            x.Add(new XElement("tag", t));
+        }
+
         if (lockData)
         {
             x.Add(new XElement("lockdata", "true"));
         }
 
         var first = true;
-        foreach (var provider in new[] { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB" })
+        ids = CanonicalIds(ids);
+
+        // every id goes in (TvRage, AniSearch, Kitsu...): a show re-created from this NFO (renamed folder = new item)
+        // must come back with the same ids, or it no longer matches its verified mark
+        var order = new[] { "Tmdb", "Tvdb", "Imdb", "AniList", "AniDB" };
+        foreach (var provider in order.Concat(ids.Keys.Where(k => k != "TmdbCollection" && !order.Contains(k)).OrderBy(k => k, StringComparer.Ordinal)))
         {
             if (ids.TryGetValue(provider, out var v))
             {
                 var uid = new XElement("uniqueid", new XAttribute("type", provider.ToLowerInvariant()), v);
-                if (first && provider != "AniList" && provider != "AniDB")
+                if (first && provider is "Tmdb" or "Tvdb" or "Imdb")
                 {
                     uid.Add(new XAttribute("default", "true"));
                     first = false;

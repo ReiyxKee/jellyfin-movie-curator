@@ -87,7 +87,7 @@ public class IdentifyJob : ICuratorJob
     /// <summary>null | "stop" (finish current item, skip the rest) | "force" (abort now, roll back current item)</summary>
     [JsonPropertyName("stopMode")] public string? StopMode { get; set; }
 
-    [JsonPropertyName("steps")] public int Steps => 7;
+    [JsonPropertyName("steps")] public int Steps => 6;
 
     [JsonIgnore] public bool Started { get; set; }
 
@@ -306,6 +306,12 @@ public static class IdentifyQueue
                 item.IsLocked = true;
                 await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
             }
+            else
+            {
+                // not what was asked for: say so on the item instead of reporting a clean "done"
+                it.Error = $"{it.Result.SearchProviderName ?? "the picked source"} gave no metadata: filled from all enabled sources "
+                    + "(the pick's title, year, plot and poster kept). Identify it again to retry.";
+            }
 
             // seasons / episodes (a show) - or everything, when the picked source couldn't be asked on its own
             using var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -343,22 +349,9 @@ public static class IdentifyQueue
             Step(5, "marking verified");
             service.SetVerified(new[] { it.ItemId }, true);
 
-            // named after the match right away: folder, videos and all subtitle files (logged: undo in the history)
-            Step(6, "renaming (folder, videos, subtitles)");
-            var renamed = await service.Apply(
-                new[] { it.ItemId },
-                new PlanOptions
-                {
-                    Type = job.Options.Type, Mode = "rename", Ids = it.ItemId, Rename = true, Episodes = job.Options.Type == "series",
-                    Nfo = false, LockNfo = true, Flatten = false,
-                },
-                ct).ConfigureAwait(false);
-            if (renamed.Errors.Count > 0)
-            {
-                it.Error = "renamed with problems: " + string.Join("; ", renamed.Errors.Take(3));
-            }
-
-            it.StepIndex = 7;
+            // Identify only updates the metadata + NFO: files and folders stay where they are. "Rename files" names them
+            // from the NFO afterwards (renaming here made Jellyfin drop the show and re-create it as a new item).
+            it.StepIndex = 6;
             it.Step = "done";
             it.Status = "done";
         }
